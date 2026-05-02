@@ -1,5 +1,5 @@
 // Customs API - uses the same base URL as the main api but with /api/customs path
-const customsBase = (import.meta.env.VITE_API_BASE_URL || 'https://service-production-1ef2.up.railway.app/api/v1')
+const customsBase = (import.meta.env.VITE_API_BASE_URL || 'https://crm-app.up.railway.app/api/v1')
   .replace('/api/v1', '/api/customs')
 
 function getToken() {

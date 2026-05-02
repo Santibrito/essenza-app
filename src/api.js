@@ -1,6 +1,6 @@
 import { useAuthStore } from './stores/auth'
 
-const apiUrl = import.meta.env.VITE_API_BASE_URL || 'https://service-production-1ef2.up.railway.app/api/v1'
+const apiUrl = import.meta.env.VITE_API_BASE_URL || 'https://crm-app.up.railway.app/api/v1'
 
 // Cache for preventing duplicate requests
 const requestCache = new Map()
