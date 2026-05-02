@@ -1,6 +1,6 @@
 {
   "name": "essenzamodels",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "author": "sb",
   "type": "module",
   "description": "Corporate Communication Platform",
@@ -97,7 +97,9 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["universal"]
+          "arch": [
+            "universal"
+          ]
         }
       ],
       "icon": "public/icons.icns"
