@@ -1,12 +1,12 @@
 {
   "name": "essenzamodels",
-  "version": "1.3.35",
-  "author": "SB TECHNOLOGY",
+  "version": "1.0.0",
+  "author": "sb",
   "type": "module",
   "description": "Corporate Communication Platform",
   "main": "electron/main.cjs",
   "scripts": {
-    "dev": "node scripts/optimize-for-low-ram.js && concurrently -k -n \"VITE,ELECTRON\" -c \"cyan,yellow\" \"vite --port 5173\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development VITE_APP_VERSION=1.1.1 electron .\"",
+    "dev": "node scripts/optimize-for-low-ram.js && concurrently -k -n \"VITE,ELECTRON\" -c \"cyan,yellow\" \"vite --port 5173\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development VITE_APP_VERSION=1.0.0 electron .\"",
     "build": "node scripts/optimize-assets.js && vite build && node scripts/analyze-bundle.js",
     "electron": "node scripts/optimize-for-low-ram.js && electron .",
     "preview": "vite preview",
@@ -56,7 +56,7 @@
   },
   "build": {
     "appId": "com.essenzamodels.monitor",
-    "productName": "ESSENZA MODELS",
+    "productName": "essenzamodels",
     "asar": true,
     "compression": "maximum",
     "directories": {
@@ -76,8 +76,8 @@
     ],
     "publish": {
       "provider": "github",
-      "owner": "TU_USUARIO_GITHUB",
-      "repo": "TU_NUEVO_REPO",
+      "owner": "Santibrito",
+      "repo": "essenza-app",
       "releaseType": "release"
     },
     "win": {
