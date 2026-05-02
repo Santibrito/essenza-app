@@ -1,0 +1,369 @@
+const { app, BrowserWindow, ipcMain, desktopCapturer, powerMonitor, Tray, Menu, nativeImage } = require('electron')
+const path = require('path')
+const { autoUpdater } = require('electron-updater')
+
+const isDev = process.env.NODE_ENV === 'development'
+
+// ─── Auto Updater ─────────────────────────────────────────────────────────────
+autoUpdater.autoDownload = true
+autoUpdater.autoInstallOnAppQuit = true
+
+autoUpdater.on('update-available', (info) => {
+  mainWindow?.webContents.send('updater:status', { type: 'available', info })
+})
+
+autoUpdater.on('update-downloaded', (info) => {
+  mainWindow?.webContents.send('updater:status', { type: 'ready', info })
+})
+
+autoUpdater.on('error', (err) => {
+  console.error('AutoUpdater error:', err?.message)
+})
+
+// El renderer puede pedirle al main que instale y reinicie
+ipcMain.on('updater:install-now', () => {
+  autoUpdater.quitAndInstall()
+})
+
+// Verificar actualizaciones periódicamente (cada 1 hora)
+setInterval(() => {
+  if (!isDev) autoUpdater.checkForUpdates()
+}, 60 * 60 * 1000)
+
+let mainWindow = null
+let tray = null
+let isShiftActive = false
+let shiftTimerSeconds = 0
+let shiftTimerInterval = null
+
+// Build a 16x16 RGBA tray icon programmatically — works reliably on all platforms
+function buildTrayIcon() {
+  const size = 16
+  const buf = Buffer.alloc(size * size * 4) // RGBA
+  const [r, g, b] = isShiftActive ? [16, 185, 129] : [107, 114, 128] // emerald-500 vs gray-500
+
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const cx = x - size / 2 + 0.5
+      const cy = y - size / 2 + 0.5
+      const dist = Math.sqrt(cx * cx + cy * cy)
+      const alpha = dist < (size / 2 - 0.5) ? 255 : 0
+      const i = (y * size + x) * 4
+      buf[i]     = r
+      buf[i + 1] = g
+      buf[i + 2] = b
+      buf[i + 3] = alpha
+    }
+  }
+
+  return nativeImage.createFromBuffer(buf, { width: size, height: size })
+}
+
+function formatTrayTime(secs) {
+  const h = Math.floor(secs / 3600)
+  const m = Math.floor((secs % 3600) / 60)
+  return `${String(h).padStart(2, '0')}h ${String(m).padStart(2, '0')}m`
+}
+
+function updateTrayTooltip() {
+  if (!tray) return
+  const status = isShiftActive ? `🟢 Turno activo — ${formatTrayTime(shiftTimerSeconds)}` : '⚫ Sin turno activo'
+  tray.setToolTip(`ESSENZA MODELS\n${status}`)
+  tray.setTitle(isShiftActive ? formatTrayTime(shiftTimerSeconds) : '')
+}
+
+function buildContextMenu() {
+  return Menu.buildFromTemplate([
+    {
+      label: isShiftActive
+        ? `🟢 Trabajando — ${formatTrayTime(shiftTimerSeconds)}`
+        : '⚫ Sin turno activo',
+      enabled: false,
+    },
+    { type: 'separator' },
+    {
+      label: 'Abrir Essenza',
+      click: () => {
+        mainWindow?.show()
+        mainWindow?.focus()
+      },
+    },
+    { type: 'separator' },
+    {
+      label: 'Salir completamente',
+      click: () => {
+        app.isQuitting = true
+        app.quit()
+      },
+    },
+  ])
+}
+
+function createTray() {
+  tray = new Tray(buildTrayIcon())
+  tray.setToolTip('ESSENZA MODELS')
+
+  // Left-click → show/focus window
+  tray.on('click', () => {
+    if (mainWindow) {
+      if (mainWindow.isVisible()) {
+        mainWindow.focus()
+      } else {
+        mainWindow.show()
+      }
+    }
+  })
+
+  tray.setContextMenu(buildContextMenu())
+
+  // Refresh context menu every 5s so the time stays updated
+  setInterval(() => {
+    if (tray) {
+      tray.setContextMenu(buildContextMenu())
+      tray.setImage(buildTrayIcon())
+      updateTrayTooltip()
+    }
+  }, 5000)
+}
+
+// ─── Main window ─────────────────────────────────────────────────────────────
+app.setName('ESSENZA MODELS')
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1280,
+    height: 800,
+    minWidth: 900,
+    minHeight: 600,
+    frame: false,
+    backgroundColor: '#08080f',
+    webPreferences: {
+      backgroundThrottling: false,
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      webSecurity: !isDev,
+    },
+    show: false,
+  })
+
+  mainWindow.once('ready-to-show', () => mainWindow.show())
+
+  // Maximize / unmaximize state events
+  mainWindow.on('maximize',   () => mainWindow.webContents.send('window:state-changed', true))
+  mainWindow.on('unmaximize', () => mainWindow.webContents.send('window:state-changed', false))
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // KEY FIX: intercept the close event — hide to tray instead of quitting
+  // unless app.isQuitting is set (i.e. user chose "Salir completamente")
+  // ──────────────────────────────────────────────────────────────────────────
+  mainWindow.on('close', (event) => {
+    if (!app.isQuitting) {
+      event.preventDefault()
+      mainWindow.hide()
+
+      // Notify tray (Windows shows a balloon the first time)
+      if (tray && isShiftActive) {
+        tray.displayBalloon({
+          iconType: 'info',
+          title: 'Essenza Monitor',
+          content: '🟢 Tu turno sigue activo en segundo plano.',
+        })
+      }
+    }
+  })
+
+  if (isDev) {
+    mainWindow.loadURL('http://localhost:5173')
+  } else {
+    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
+  }
+}
+
+// ─── IPC: Window controls ────────────────────────────────────────────────────
+ipcMain.on('window:minimize', () => mainWindow?.minimize())
+ipcMain.on('window:maximize', () => {
+  if (!mainWindow) return
+  mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize()
+})
+ipcMain.on('window:close', () => {
+  // Respect the close interceptor above — just call close (it will hide)
+  mainWindow?.close()
+})
+
+ipcMain.handle('window:is-maximized', (e) =>
+  BrowserWindow.fromWebContents(e.sender)?.isMaximized() ?? false
+)
+
+// ─── IPC: Notifications ──────────────────────────────────────────────────────
+ipcMain.on('notification:send', (_e, { title, body, silent }) => {
+  const { Notification } = require('electron')
+  new Notification({ 
+    title, 
+    body, 
+    silent: silent ?? false,
+    icon: path.join(__dirname, '../public/icon.png')
+  }).show()
+})
+
+// ─── IPC: Shift state (sent from renderer so tray stays in sync) ──────────
+let backgroundSyncData = {
+  apiUrl: '',
+  token: '',
+  shiftId: null,
+  isPaused: false
+}
+
+async function performBackgroundSync() {
+  if (!isShiftActive || backgroundSyncData.isPaused || !backgroundSyncData.token || !backgroundSyncData.shiftId) return
+
+  try {
+    const { net } = require('electron')
+    const url = `${backgroundSyncData.apiUrl}/shifts/${backgroundSyncData.shiftId}/sync-app`
+    
+    // Get active app name from main process (more reliable)
+    let activeApp = 'Sistema'
+    try {
+      const activeWin = await import('active-win')
+      const win = await activeWin.default()
+      if (win) {
+        activeApp = win.owner?.name || win.title || 'Sistema';
+      }
+    } catch {}
+
+    const idleTimeSeconds = powerMonitor.getSystemIdleTime()
+
+    const request = net.request({
+      method: 'POST',
+      url: url,
+    })
+    request.setHeader('Authorization', `Bearer ${backgroundSyncData.token}`)
+    request.setHeader('Content-Type', 'application/json')
+    
+    const payload = JSON.stringify({
+      activeApp,
+      idleTimeSeconds,
+      activeTimeSeconds: shiftTimerSeconds
+    })
+    
+    request.on('error', (err) => console.error('BG Sync Network Error:', err))
+    request.write(payload)
+    request.end()
+  } catch (err) {
+    console.error('Background sync failed:', err)
+  }
+}
+
+// Global interval for background sync (every 10 seconds)
+setInterval(() => {
+  if (isShiftActive && !backgroundSyncData.isPaused) {
+    performBackgroundSync()
+  }
+}, 10000)
+
+ipcMain.on('shift:started', (_e, data) => {
+  isShiftActive = true
+  shiftTimerSeconds = 0
+  
+  if (data) {
+    backgroundSyncData = { ...backgroundSyncData, ...data, isPaused: false }
+  }
+
+  if (shiftTimerInterval) clearInterval(shiftTimerInterval)
+  shiftTimerInterval = setInterval(() => {
+    if (!isShiftActive) {
+      clearInterval(shiftTimerInterval)
+      return
+    }
+    shiftTimerSeconds++
+    updateTrayTooltip()
+  }, 1000)
+})
+
+ipcMain.on('shift:stopped', () => {
+  isShiftActive = false
+  shiftTimerSeconds = 0
+  backgroundSyncData = { apiUrl: '', token: '', shiftId: null, isPaused: false }
+  
+  if (shiftTimerInterval) {
+    clearInterval(shiftTimerInterval)
+    shiftTimerInterval = null
+  }
+  
+  updateTrayTooltip()
+})
+
+ipcMain.on('shift:paused', () => {
+  backgroundSyncData.isPaused = true
+})
+
+ipcMain.on('shift:resumed', () => {
+  backgroundSyncData.isPaused = false
+})
+
+// Renderer can push the current seconds for resuming a recovered shift
+ipcMain.on('shift:sync-time', (_e, data) => {
+  if (typeof data === 'number') {
+    shiftTimerSeconds = data
+  } else if (data && typeof data === 'object') {
+    shiftTimerSeconds = data.seconds || shiftTimerSeconds
+    if (data.token) backgroundSyncData.token = data.token
+    if (data.apiUrl) backgroundSyncData.apiUrl = data.apiUrl
+    if (data.shiftId) backgroundSyncData.shiftId = data.shiftId
+  }
+})
+
+// ─── IPC: Screen / activity ──────────────────────────────────────────────────
+ipcMain.handle('get-screenshot', async () => {
+  const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 800, height: 450 } })
+  return sources.map(source => ({
+    name: source.name,
+    id: source.id,
+    image: source.thumbnail.toDataURL('image/jpeg', 0.5)
+  }))
+})
+
+ipcMain.handle('get-idle-time', () => powerMonitor.getSystemIdleTime())
+
+ipcMain.handle('get-active-window', async () => {
+  try {
+    const activeWin = await import('active-win')
+    const win = await activeWin.default()
+    if (win) {
+      return win.owner?.name || win.title || 'Sistema';
+    }
+    return 'Sistema'
+  } catch (e) {
+    return 'Sistema'
+  }
+})
+
+// ─── App lifecycle ───────────────────────────────────────────────────────────
+app.whenReady().then(() => {
+  createWindow()
+  createTray()
+
+  // Buscar actualizaciones 5 segundos después de que la app cargue
+  // (solo en producción, no en dev)
+  if (!isDev) {
+    app.setAppUserModelId('com.essenzamodels.monitor')
+    setTimeout(() => autoUpdater.checkForUpdates(), 5000)
+  }
+})
+
+// Prevent quitting when all windows are closed (we hide to tray instead)
+app.on('window-all-closed', () => {
+  // On macOS the convention is to keep the app open until the user quits explicitly
+  if (process.platform === 'darwin') return
+  // On Windows/Linux: do NOT quit — we live in the tray
+  // (app.quit() will only be called when "Salir completamente" is clicked)
+})
+
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  else mainWindow?.show()
+})
+
+app.on('before-quit', () => {
+  app.isQuitting = true
+})
