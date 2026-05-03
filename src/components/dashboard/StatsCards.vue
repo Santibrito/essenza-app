@@ -28,12 +28,11 @@ const formatTime = (secs: number): string => {
 }
 
 // Calculate daily debt (remaining time to complete target)
+// Backend now includes active shifts, so we don't add workTime here
 const dailyDebtSeconds = computed(() => {
   const targetSeconds = props.dailySummary?.targetSeconds ?? auth.user?.shiftTargetSeconds ?? 28800
   const todayActiveSeconds = props.dailySummary?.todayActiveSeconds ?? 0
-  const effectiveWorkSeconds = Math.max(0, props.workTime - props.idleTime)
-  const totalTodaySeconds = todayActiveSeconds + effectiveWorkSeconds
-  return Math.max(0, targetSeconds - totalTodaySeconds)
+  return Math.max(0, targetSeconds - todayActiveSeconds)
 })
 </script>
 
