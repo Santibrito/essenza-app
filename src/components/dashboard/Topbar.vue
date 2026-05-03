@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Menu, Search, Command, Radio, HelpCircle } from 'lucide-vue-next'
+import { Menu, Search, Command, Radio, HelpCircle, WifiOff, Wifi } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -11,6 +11,7 @@ const props = defineProps<{
   statusLabel: string
   statusColor: string
   shiftTarget: number
+  isServerDown?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -109,13 +110,31 @@ const getTabLabel = (tab: string) => {
         <Separator orientation="vertical" class="h-5 bg-border/50" />
 
         <!-- Connection Status -->
-        <div class="flex flex-col items-start px-1 group">
-          <p class="text-[8px] font-bold text-muted-foreground uppercase tracking-widest leading-none mb-1">Sync</p>
-          <div class="flex items-center gap-1.5">
-            <div class="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-            <span class="text-[9px] font-black text-foreground uppercase tracking-tighter leading-none">En Línea</span>
-          </div>
-        </div>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <div class="flex flex-col items-start px-1 group cursor-help">
+                <p class="text-[8px] font-bold text-muted-foreground uppercase tracking-widest leading-none mb-1">Sync</p>
+                <div class="flex items-center gap-1.5">
+                  <component 
+                    :is="isServerDown ? WifiOff : Wifi" 
+                    :class="['w-3 h-3', isServerDown ? 'text-red-500' : 'text-emerald-500']" 
+                  />
+                  <span 
+                    :class="['text-[9px] font-black uppercase tracking-tighter leading-none', isServerDown ? 'text-red-500' : 'text-emerald-500']"
+                  >
+                    {{ isServerDown ? 'Sin Conexión' : 'En Línea' }}
+                  </span>
+                </div>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p class="text-xs">
+                {{ isServerDown ? 'No se puede conectar con el servidor' : 'Conectado al servidor' }}
+              </p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       </div>
     </div>
   </header>

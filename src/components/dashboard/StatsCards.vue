@@ -5,12 +5,17 @@ import {
 import { Card, CardContent } from '@/components/ui/card'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useAuthStore } from '@/stores/auth'
+import { computed } from 'vue'
 
 const props = defineProps<{
   shiftCompliancePercent: number
   workTime: number
   idleTime: number
   breakTime: number
+  dailySummary?: {
+    todayActiveSeconds: number
+    targetSeconds: number
+  }
 }>()
 
 const auth = useAuthStore()
@@ -21,6 +26,15 @@ const formatTime = (secs: number): string => {
   const s = secs % 60
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
+
+// Calculate daily debt (remaining time to complete target)
+const dailyDebtSeconds = computed(() => {
+  const targetSeconds = props.dailySummary?.targetSeconds ?? auth.user?.shiftTargetSeconds ?? 28800
+  const todayActiveSeconds = props.dailySummary?.todayActiveSeconds ?? 0
+  const effectiveWorkSeconds = Math.max(0, props.workTime - props.idleTime)
+  const totalTodaySeconds = todayActiveSeconds + effectiveWorkSeconds
+  return Math.max(0, targetSeconds - totalTodaySeconds)
+})
 </script>
 
 <template>
@@ -44,12 +58,12 @@ const formatTime = (secs: number): string => {
           accent: 'bg-blue-500'
         },
         {
-          l: 'Deuda AFK',
-          v: formatTime(idleTime),
-          c: 'text-amber-500',
+          l: 'Deuda Diaria',
+          v: formatTime(dailyDebtSeconds),
+          c: dailyDebtSeconds > 0 ? 'text-amber-500' : 'text-emerald-500',
           i: AlertTriangle,
-          sub: 'Tiempo detectado en inactividad',
-          accent: 'bg-amber-500'
+          sub: 'Tiempo restante para completar la meta del día',
+          accent: dailyDebtSeconds > 0 ? 'bg-amber-500' : 'bg-emerald-500'
         },
         {
           l: 'Break',

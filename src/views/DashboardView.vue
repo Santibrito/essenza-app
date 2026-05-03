@@ -259,10 +259,13 @@ let breakInterval: any = null
 let pollingInterval: any = null
 let syncInterval: any = null
 let autoScreenshotInterval: any = null
+let healthCheckInterval: any = null
 let isSyncing = false
 let isPolling = false
 let isCapturing = false
 let hasNotifiedTargetReached = false
+let isServerDown = ref(false)
+let consecutiveFailures = ref(0)
 
 const authHeaders = () => ({
   'Authorization': `Bearer ${auth.user?.token}`,
@@ -336,7 +339,7 @@ async function startShift(isExtra = false) {
     workTime.value = 0; idleTime.value = 0
     isWorking.value = true; isPaused.value = false; isExtraHours.value = isExtra
     hasNotifiedTargetReached = false
-    startWorkTimer(); startPolling(); startSync(); startAutoScreenshot()
+    startWorkTimer(); startPolling(); startSync(); startAutoScreenshot(); startHealthCheck()
     window.electronAPI?.shift?.started({ apiUrl, token: auth.user?.token, shiftId: data.id })
     toast.success(isExtra ? 'Horas extras iniciadas' : 'Turno iniciado correctamente')
     showStartModal.value = false
@@ -518,6 +521,14 @@ function startPolling() {
     isPolling = true
     try {
       const res = await fetch(`${apiUrl}/shifts/current`, { headers: authHeaders() })
+      
+      // Reset server down state on successful response
+      if (isServerDown.value) {
+        isServerDown.value = false
+        consecutiveFailures.value = 0
+        toast.success('Conexión restablecida', { description: 'La conexión con el servidor se ha recuperado.' })
+      }
+      
       if (res.status === 204) {
         try {
           if (currentShiftId.value) {
@@ -552,10 +563,60 @@ function startPolling() {
         console.log('📸 Screenshot requested by admin, capturing...')
         captureAndUpload()
       }
-    } catch (err) { }
+    } catch (err) {
+      consecutiveFailures.value++
+      if (consecutiveFailures.value >= 3 && !isServerDown.value) {
+        isServerDown.value = true
+        toast.error('Conexión perdida', { 
+          description: 'No se puede conectar con el servidor. Verificá tu conexión a internet.', 
+          duration: 10000 
+        })
+        window.electronAPI?.sendNotification?.({ 
+          title: 'Conexión Perdida', 
+          body: 'No se puede conectar con el servidor. El turno se pausará hasta recuperar la conexión.' 
+        })
+      }
+    }
     finally { isPolling = false; if (isWorking.value) pollingInterval = setTimeout(runner, 10000) }
   }
   runner()
+}
+
+// Health check - verifica cada 30 segundos que el servidor responde
+function startHealthCheck() {
+  if (healthCheckInterval) clearInterval(healthCheckInterval)
+  healthCheckInterval = setInterval(async () => {
+    try {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 5000) // 5 second timeout
+      
+      const res = await fetch(`${apiUrl}/health`, { 
+        headers: authHeaders(),
+        signal: controller.signal 
+      })
+      
+      clearTimeout(timeoutId)
+      
+      if (res.ok) {
+        if (isServerDown.value) {
+          isServerDown.value = false
+          consecutiveFailures.value = 0
+          toast.success('Conexión restablecida', { description: 'La conexión con el servidor se ha recuperado.' })
+        }
+      } else {
+        throw new Error('Health check failed')
+      }
+    } catch (err) {
+      consecutiveFailures.value++
+      if (consecutiveFailures.value >= 2 && !isServerDown.value) {
+        isServerDown.value = true
+        toast.error('Conexión perdida', { 
+          description: 'No se puede conectar con el servidor. Verificá tu conexión a internet.', 
+          duration: 10000 
+        })
+      }
+    }
+  }, 30000) // Check every 30 seconds
 }
 
 // --- Handlers ---
@@ -593,6 +654,7 @@ function clearAllTimers() {
   if (pollingInterval) clearTimeout(pollingInterval)
   if (syncInterval) clearTimeout(syncInterval)
   if (autoScreenshotInterval) clearTimeout(autoScreenshotInterval)
+  if (healthCheckInterval) clearInterval(healthCheckInterval)
 }
 
 const handoffData = ref<Record<number, any[]>>({})
@@ -623,7 +685,7 @@ onMounted(async () => {
         if (data.targetSeconds) shiftTarget.value = data.targetSeconds
         isWorking.value = true; isPaused.value = data.status === 'PAUSED'
         if (!isPaused.value) startWorkTimer()
-        startPolling(); startSync(); startAutoScreenshot()
+        startPolling(); startSync(); startAutoScreenshot(); startHealthCheck()
       }
     }
   } catch { }
@@ -667,7 +729,7 @@ onUnmounted(() => {
 
         <!-- Modular Topbar -->
         <Topbar :active-tab="activeTab" :is-working="isWorking" :is-paused="isPaused" :status-label="statusLabel"
-          :status-color="statusColor" :shift-target="missingShiftSeconds" @toggle-sidebar="sidebarOpen = !sidebarOpen"
+          :status-color="statusColor" :shift-target="missingShiftSeconds" :is-server-down="isServerDown" @toggle-sidebar="sidebarOpen = !sidebarOpen"
           @start-shift="isExtraHoursSelection = $event; showStartModal = true" @toggle-break="toggleBreak"
           @end-shift="endShiftPrompt" @start-tour="startTourManually" />
         
@@ -692,7 +754,7 @@ onUnmounted(() => {
             <template v-if="activeTab === 'tracker'">
               <!-- Modular Stats Overview -->
               <StatsCards :shift-compliance-percent="shiftCompliancePercent" :work-time="workTime" :idle-time="idleTime"
-                :break-time="breakTime" />
+                :break-time="breakTime" :daily-summary="dailySummary" />
 
               <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <!-- Modular Tracker/Timer Card -->
