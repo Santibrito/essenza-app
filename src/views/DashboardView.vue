@@ -502,8 +502,10 @@ async function captureAndUpload() {
 function startAutoScreenshot() {
   if (autoScreenshotInterval) clearTimeout(autoScreenshotInterval)
   const runner = async () => {
+    // Don't capture if paused (break) or not working
     if (!isWorking.value || isPaused.value) return
     await captureAndUpload()
+    // Only schedule next capture if still working and not paused
     if (isWorking.value && !isPaused.value) autoScreenshotInterval = setTimeout(runner, 6 * 60 * 1000)
   }
   setTimeout(runner, 1000)
