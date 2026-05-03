@@ -358,11 +358,11 @@ async function updateStatus() {
                       <Upload class="w-3 h-3" /> Link de Drive *
                     </label>
                     <input v-model="driveLink" placeholder="https://drive.google.com/..."
-                      class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                      class="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-0" />
                   </div>
 
-                  <textarea v-model="comment" placeholder="Comentario opcional..." rows="3"
-                    class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none" />
+                  <textarea v-model="comment" placeholder="Agregar comentario..." rows="3"
+                    class="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-0 resize-none" />
 
                   <Button class="w-full" @click="updateStatus" :disabled="saving">
                     <Send class="w-3.5 h-3.5 mr-1.5" />

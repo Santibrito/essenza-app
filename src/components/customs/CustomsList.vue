@@ -27,49 +27,6 @@ const { customs, loading, urgent, byModel, completed, load, refreshOne } = useCu
   () => props.modelIds
 )
 
-// User names cache
-const userNamesCache = ref({})
-const apiUrl = import.meta.env.VITE_API_BASE_URL || 'https://crm-app.up.railway.app/api/v1'
-
-// Función para obtener el nombre real de un usuario por username
-async function fetchUserRealName(username) {
-  if (!username) return username
-  
-  // Check cache first
-  if (userNamesCache.value[username]) {
-    return userNamesCache.value[username]
-  }
-  
-  try {
-    const token = localStorage.getItem('token')
-    const res = await fetch(`${apiUrl}/admin/users`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
-    if (res.ok) {
-      const users = await res.json()
-      const user = users.find(u => u.username === username)
-      if (user?.name) {
-        userNamesCache.value[username] = user.name
-        return user.name
-      }
-    }
-  } catch (error) {
-    console.log(`No se pudo obtener el nombre real para ${username}`)
-  }
-  
-  // Fallback: mapeo manual para usuarios conocidos
-  const knownUsers = {
-    'yisus': 'Yisus',
-    'admin': 'Administrador', 
-    'marketing': 'Marketing',
-    'support': 'Soporte',
-  }
-  
-  const displayName = knownUsers[username] || username
-  userNamesCache.value[username] = displayName
-  return displayName
-}
-
 // Sheet & Modal state
 const selected = ref(null)
 const sheetOpen = ref(false)
@@ -90,8 +47,8 @@ const itemsPerPage = 20
 const customsWithRealNames = computed(() => {
   return customs.value.map(c => ({
     ...c,
-    displayCreatedBy: userNamesCache.value[c.createdByUsername] || c.createdByUsername || '—',
-    displayCompletedBy: userNamesCache.value[c.completedByUsername] || c.completedByUsername || '—'
+    displayCreatedBy: c.createdByUser?.name || c.createdByUser?.username || c.createdByUsername || '—',
+    displayCompletedBy: c.completedByUser?.name || c.completedByUser?.username || c.completedByUsername || '—'
   }))
 })
 
@@ -149,22 +106,6 @@ const stats = computed(() => ({
   readyForUpload: customs.value.filter(c => c.status === 'READY_FOR_UPLOAD').length,
   completed: completed.value.length,
 }))
-
-// Watch customs to load user names
-watch(customs, async (newCustoms) => {
-  const usernames = new Set()
-  newCustoms.forEach(c => {
-    if (c.createdByUsername) usernames.add(c.createdByUsername)
-    if (c.completedByUsername) usernames.add(c.completedByUsername)
-  })
-  
-  // Load all unique usernames
-  for (const username of usernames) {
-    if (!userNamesCache.value[username]) {
-      await fetchUserRealName(username)
-    }
-  }
-}, { immediate: true })
 
 // Methods
 function openSheet(custom) {
