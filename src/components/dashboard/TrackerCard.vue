@@ -139,7 +139,7 @@ const assignedEnd = computed(() => {
         <Badge v-if="debtSeconds > 0" variant="outline"
           class="gap-1.5 px-3 py-1 text-[10px] font-black uppercase text-amber-500 border-amber-500/20 bg-amber-500/5">
           <AlertTriangle class="w-3 h-3" />
-          Deuda: {{ fmtDebt(debtSeconds) }}
+          Deuda de Ayer: {{ fmtDebt(debtSeconds) }}
         </Badge>
 
         <div
