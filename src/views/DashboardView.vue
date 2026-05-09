@@ -267,6 +267,14 @@ let hasNotifiedTargetReached = false
 let isServerDown = ref(false)
 let consecutiveFailures = ref(0)
 
+// System capabilities - adjusted based on hardware
+let systemCapabilities = ref<any>(null)
+let screenshotInterval = ref(6 * 60 * 1000) // Default 6 minutes
+let syncIntervalMs = ref(10000) // Default 10 seconds
+let screenshotQuality = ref(0.5) // Default quality
+let screenshotMaxWidth = ref(800)
+let screenshotMaxHeight = ref(450)
+
 const authHeaders = () => ({
   'Authorization': `Bearer ${auth.user?.token}`,
   'Content-Type': 'application/json'
@@ -489,7 +497,11 @@ async function captureAndUpload() {
   isCapturing = true
   try {
     if (window.electronAPI?.screen) {
-      const screensRaw = await window.electronAPI.screen.takeScreenshot()
+      const screensRaw = await window.electronAPI.screen.takeScreenshot({
+        quality: screenshotQuality.value,
+        maxWidth: screenshotMaxWidth.value,
+        maxHeight: screenshotMaxHeight.value
+      })
       if (screensRaw?.length > 0) {
         await fetch(`${apiUrl}/shifts/${currentShiftId.value}/upload-screenshot`, {
           method: 'POST',
@@ -498,7 +510,10 @@ async function captureAndUpload() {
         })
       }
     }
-  } catch (err) { console.error('Capture error:', err) }
+  } catch (err) { 
+    console.error('Capture error:', err)
+    // Don't crash the app if screenshot fails - just log and continue
+  }
   finally { isCapturing = false }
 }
 
@@ -509,7 +524,7 @@ function startAutoScreenshot() {
     if (!isWorking.value || isPaused.value) return
     await captureAndUpload()
     // Only schedule next capture if still working and not paused
-    if (isWorking.value && !isPaused.value) autoScreenshotInterval = setTimeout(runner, 6 * 60 * 1000)
+    if (isWorking.value && !isPaused.value) autoScreenshotInterval = setTimeout(runner, screenshotInterval.value)
   }
   setTimeout(runner, 1000)
 }
@@ -668,6 +683,29 @@ async function loadHandoff() {
 }
 
 onMounted(async () => {
+  // Detect system capabilities and adjust intervals for low-end hardware
+  if (window.electronAPI?.screen?.getSystemCapabilities) {
+    try {
+      systemCapabilities.value = await window.electronAPI.screen.getSystemCapabilities()
+      console.log('[System] Capabilities detected:', systemCapabilities.value)
+      
+      if (systemCapabilities.value.isLowEnd) {
+        console.log('[System] Low-end hardware detected - applying optimizations')
+        screenshotInterval.value = systemCapabilities.value.recommendedScreenshotInterval
+        syncIntervalMs.value = systemCapabilities.value.recommendedSyncInterval
+        screenshotQuality.value = systemCapabilities.value.screenshotQuality
+        screenshotMaxWidth.value = systemCapabilities.value.maxScreenshotWidth
+        screenshotMaxHeight.value = systemCapabilities.value.maxScreenshotHeight
+        
+        toast.info(`Sistema optimizado para ${systemCapabilities.value.totalRAM}GB RAM`, {
+          description: 'Capturas cada 10 minutos para mejor rendimiento'
+        })
+      }
+    } catch (err) {
+      console.error('[System] Failed to detect capabilities:', err)
+    }
+  }
+  
   auth.refreshUserProfile()
   fetchTemplates()
   fetchUserAllSchedules()

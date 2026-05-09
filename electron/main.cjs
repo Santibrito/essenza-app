@@ -424,16 +424,36 @@ ipcMain.on('shift:sync-time', (_e, data) => {
 })
 
 // ─── IPC: Screen / activity ──────────────────────────────────────────────────
-ipcMain.handle('get-screenshot', async () => {
-  const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 800, height: 450 } })
-  return sources.map(source => ({
-    name: source.name,
-    id: source.id,
-    image: source.thumbnail.toDataURL('image/jpeg', 0.5)
-  }))
+ipcMain.handle('get-screenshot', async (_e, options = {}) => {
+  try {
+    const quality = options.quality || 0.5
+    const maxWidth = options.maxWidth || 800
+    const maxHeight = options.maxHeight || 450
+    
+    const sources = await desktopCapturer.getSources({ 
+      types: ['screen'], 
+      thumbnailSize: { width: maxWidth, height: maxHeight } 
+    })
+    
+    return sources.map(source => ({
+      name: source.name,
+      id: source.id,
+      image: source.thumbnail.toDataURL('image/jpeg', quality)
+    }))
+  } catch (error) {
+    console.error('[Screenshot] Capture failed:', error)
+    return [] // Return empty array instead of crashing
+  }
 })
 
-ipcMain.handle('get-idle-time', () => powerMonitor.getSystemIdleTime())
+ipcMain.handle('get-idle-time', () => {
+  try {
+    return powerMonitor.getSystemIdleTime()
+  } catch (error) {
+    console.error('[IdleTime] Failed to get idle time:', error)
+    return 0
+  }
+})
 
 ipcMain.handle('get-active-window', async () => {
   try {
@@ -444,7 +464,28 @@ ipcMain.handle('get-active-window', async () => {
     }
     return 'Sistema'
   } catch (e) {
+    console.error('[ActiveWindow] Failed to get active window:', e)
     return 'Sistema'
+  }
+})
+
+ipcMain.handle('get-system-capabilities', () => {
+  const os = require('os')
+  const totalRAM = os.totalmem() / (1024 ** 3) // GB
+  const cpuCount = os.cpus().length
+  const isLowEnd = totalRAM < 8 || cpuCount < 4
+  
+  console.log(`[System] RAM: ${totalRAM.toFixed(1)}GB, CPUs: ${cpuCount}, Low-end: ${isLowEnd}`)
+  
+  return {
+    totalRAM: parseFloat(totalRAM.toFixed(1)),
+    cpuCount,
+    isLowEnd,
+    recommendedScreenshotInterval: isLowEnd ? 10 * 60 * 1000 : 6 * 60 * 1000, // 10min vs 6min
+    recommendedSyncInterval: isLowEnd ? 15000 : 10000, // 15s vs 10s
+    screenshotQuality: isLowEnd ? 0.3 : 0.5, // Lower quality for low-end systems
+    maxScreenshotWidth: isLowEnd ? 640 : 800,
+    maxScreenshotHeight: isLowEnd ? 360 : 450
   }
 })
 

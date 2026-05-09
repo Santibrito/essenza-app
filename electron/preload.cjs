@@ -12,9 +12,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
   screen: {
-    takeScreenshot:      () => ipcRenderer.invoke('get-screenshot'),
+    takeScreenshot:      (options) => ipcRenderer.invoke('get-screenshot', options),
     getIdleTime:         () => ipcRenderer.invoke('get-idle-time'),
     getActiveWindowName: () => ipcRenderer.invoke('get-active-window'),
+    getSystemCapabilities: () => ipcRenderer.invoke('get-system-capabilities'),
   },
   shift: {
     // Notify main process so the tray stays in sync
