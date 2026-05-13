@@ -601,7 +601,17 @@ function startSync() {
           isAfk.value = false
         }
         const activeApp = await window.electronAPI.screen.getActiveWindowName()
-        await fetch(`${apiUrl}/shifts/${currentShiftId.value}/sync-app`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ activeApp, idleTimeSeconds: idleTime.value, activeTimeSeconds: workTime.value, breakTimeSeconds: breakTime.value, isAfk: isAfk.value }) })
+        const res = await fetch(`${apiUrl}/shifts/${currentShiftId.value}/sync-app`, { 
+          method: 'POST', 
+          headers: authHeaders(), 
+          body: JSON.stringify({ activeApp, idleTimeSeconds: idleTime.value, activeTimeSeconds: workTime.value, breakTimeSeconds: breakTime.value, isAfk: isAfk.value }) 
+        })
+        if (res.ok) {
+          const updatedShift = await res.json()
+          if (updatedShift.activeTimeSeconds > workTime.value) {
+            workTime.value = updatedShift.activeTimeSeconds
+          }
+        }
       }
     } catch (err) { }
     finally { isSyncing = false; if (isWorking.value) syncInterval = setTimeout(runner, 5000) }
