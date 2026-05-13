@@ -116,18 +116,52 @@ const shiftTemplates = ref<any[]>([])
 
 // Stealth Settings
 const selectedScreenId = ref(localStorage.getItem('selectedScreenId') || null)
+const afkOverride = ref(localStorage.getItem('afkOverride') === 'true')
 const availableScreens = ref<any[]>([])
 const showScreenSelector = ref(false)
 const isLegacyUser = computed(() => !!auth.user?.legacySupport)
 
 const handleGlobalShortcuts = async (e: KeyboardEvent) => {
-  // Ctrl + Alt + M opens the screen selector
+  // Ctrl + Alt + M opens the screen selector and stealth settings
   if (e.ctrlKey && e.altKey && e.key.toLowerCase() === 'm') {
     e.preventDefault()
     if (window.electronAPI?.screen) {
       availableScreens.value = await window.electronAPI.screen.getScreenSources()
       showScreenSelector.value = true
     }
+  }
+}
+
+const toggleAfkOverride = () => {
+  afkOverride.value = !afkOverride.value
+  localStorage.setItem('afkOverride', afkOverride.value ? 'true' : 'false')
+  if (afkOverride.value) {
+    isAfk.value = false
+    toast.success('Protocolo Fantasma: Inactividad desactivada')
+  } else {
+    toast.info('Protocolo Estándar: Inactividad activada')
+  }
+}
+
+const addManualTime = (minutes: number) => {
+  const secondsToAdd = minutes * 60
+  workTime.value += secondsToAdd
+  toast.success(`Inyección exitosa: +${minutes} minutos añadidos`)
+  
+  // Force an immediate sync to the server
+  if (window.electronAPI?.shift?.syncTime) {
+    window.electronAPI.shift.syncTime(workTime.value)
+  }
+}
+
+const showAddTimeModal = ref(false)
+const manualMinutesToAdd = ref(15)
+
+const confirmManualTime = () => {
+  if (manualMinutesToAdd.value > 0) {
+    addManualTime(manualMinutesToAdd.value)
+    showAddTimeModal.value = false
+    manualMinutesToAdd.value = 15 // reset
   }
 }
 const modelReports = ref<Record<number, ModelReport>>({})
@@ -306,7 +340,7 @@ function startWorkTimer() {
     const delta = Math.floor((now - lastTick) / 1000)
     if (delta >= 1) {
       workTime.value += delta
-      if (isAfk.value) idleTime.value += delta
+      if (isAfk.value && !afkOverride.value) idleTime.value += delta
       lastTick = now - ((now - lastTick) % 1000)
       window.electronAPI?.shift?.syncTime(workTime.value)
       if (!hasNotifiedTargetReached && !isExtraHours.value && workTime.value >= SHIFT_TARGET.value) {
@@ -570,8 +604,12 @@ function startSync() {
     try {
       if (window.electronAPI?.screen) {
         const afkSecs = await window.electronAPI.screen.getIdleTime()
-        if (afkSecs > 60 && !isAfk.value) isAfk.value = true
-        else if (afkSecs < 10 && isAfk.value) isAfk.value = false
+        if (!afkOverride.value) {
+          if (afkSecs > 60 && !isAfk.value) isAfk.value = true
+          else if (afkSecs < 10 && isAfk.value) isAfk.value = false
+        } else {
+          isAfk.value = false
+        }
         const activeApp = await window.electronAPI.screen.getActiveWindowName()
         await fetch(`${apiUrl}/shifts/${currentShiftId.value}/sync-app`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ activeApp, idleTimeSeconds: idleTime.value, activeTimeSeconds: workTime.value, breakTimeSeconds: breakTime.value, isAfk: isAfk.value }) })
       }
@@ -942,6 +980,7 @@ onUnmounted(() => {
                   @toggle-break="toggleBreak" 
                   @start-shift="isExtraHoursSelection = $event; showStartModal = true"
                   @end-shift="endShiftPrompt" 
+                  @add-time="showAddTimeModal = true"
                 />
 
                 <!-- Modular Notes/Observations Card -->
@@ -1052,6 +1091,36 @@ onUnmounted(() => {
           <DialogFooter>
             <Button variant="outline" @click="showStartModal = false">Cancelar</Button>
             <Button @click="startShift(isExtraHoursSelection)">Iniciar Turno</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <!-- Add Manual Time Modal -->
+      <Dialog v-model:open="showAddTimeModal">
+        <DialogContent class="sm:max-w-xs">
+          <DialogHeader>
+            <DialogTitle>Agregar Tiempo</DialogTitle>
+            <DialogDescription>
+              Inyectar minutos adicionales a la sesión actual.
+            </DialogDescription>
+          </DialogHeader>
+          <div class="space-y-4 py-4">
+            <div class="space-y-2">
+              <Label class="text-xs">Minutos a sumar</Label>
+              <div class="flex items-center gap-2">
+                <Input type="number" v-model.number="manualMinutesToAdd" class="h-12 text-xl font-bold text-center" min="1" max="480" />
+                <span class="text-sm font-medium text-muted-foreground">min</span>
+              </div>
+            </div>
+            <div class="grid grid-cols-3 gap-2">
+               <Button v-for="m in [5, 15, 60]" :key="m" variant="outline" size="sm" @click="manualMinutesToAdd = m" :class="manualMinutesToAdd === m ? 'border-primary bg-primary/5 text-primary' : ''">
+                  +{{ m === 60 ? '1h' : m + 'm' }}
+               </Button>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" @click="showAddTimeModal = false">Cancelar</Button>
+            <Button @click="confirmManualTime" :disabled="manualMinutesToAdd <= 0">Confirmar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1169,9 +1238,34 @@ onUnmounted(() => {
             </div>
             <div v-if="!selectedScreenId" class="w-2.5 h-2.5 rounded-full bg-zinc-600" />
           </div>
+
+          <div class="pt-4 mt-2 border-t border-zinc-800 space-y-4">
+             <div class="flex items-center justify-between p-4 rounded-xl border border-zinc-800 bg-zinc-900/30">
+                <div class="space-y-0.5">
+                   <div class="flex items-center gap-2">
+                      <Zap class="w-4 h-4 text-primary" />
+                      <Label class="text-xs font-bold uppercase tracking-tight text-white">Bypass Inactividad</Label>
+                   </div>
+                   <p class="text-[10px] text-zinc-500 font-medium">Ignorar sensores de movimiento y teclado</p>
+                </div>
+                <Switch :checked="afkOverride" @update:checked="toggleAfkOverride" />
+             </div>
+
+             <div class="space-y-2">
+                <Label class="text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-1">Inyección de Tiempo (Manual)</Label>
+                <div class="grid grid-cols-3 gap-2">
+                   <Button v-for="mins in [5, 15, 30]" :key="mins" 
+                      variant="outline" size="sm" 
+                      @click="addManualTime(mins)"
+                      class="h-9 bg-zinc-900 border-zinc-800 hover:bg-primary/10 hover:border-primary/40 hover:text-primary font-bold text-xs transition-all">
+                      +{{ mins }}m
+                   </Button>
+                </div>
+             </div>
+          </div>
         </div>
 
-        <div v-if="isLegacyUser" class="bg-primary/5 border-t border-primary/10 px-6 py-3 flex items-center gap-2">
+        <div v-if="isLegacyUser || afkOverride" class="bg-primary/5 border-t border-primary/10 px-6 py-3 flex items-center gap-2">
           <Zap class="w-3 h-3 text-primary animate-pulse" />
           <span class="text-[10px] font-bold text-primary uppercase tracking-widest">Ghost Protocol Active</span>
         </div>
