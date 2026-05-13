@@ -31,7 +31,7 @@ const closeAnnouncement = (id: number) => {
 let interval: any = null
 onMounted(() => {
   fetchAnnouncements()
-  interval = setInterval(fetchAnnouncements, 3000) // Poll every 3s for real-time feel
+  interval = setInterval(fetchAnnouncements, 60000) // Poll every 60s for real-time feel
 })
 onUnmounted(() => clearInterval(interval))
 

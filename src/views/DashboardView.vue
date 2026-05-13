@@ -767,30 +767,21 @@ onMounted(async () => {
     return
   }
 
-  // CRITICAL: Test token validity before loading data
-  try {
-    const healthCheck = await fetch(`${apiUrl}/admin/users/me`, { 
-      headers: authHeaders(),
-      signal: AbortSignal.timeout(5000) // 5 second timeout
-    })
-    
-    if (!healthCheck.ok) {
-      if (healthCheck.status === 401 || healthCheck.status === 403) {
-        toast.error('Tu sesión expiró', {
-          description: 'Por favor, cerrá sesión y volvé a entrar.',
-          duration: 10000
-        })
-        // Don't proceed with loading if token is invalid
-        return
-      }
+  // Health check in background - don't await, don't block data loading
+  fetch(`${apiUrl}/admin/users/me`, { 
+    headers: authHeaders(),
+    signal: AbortSignal.timeout(5000)
+  }).then(healthCheck => {
+    if (!healthCheck.ok && (healthCheck.status === 401 || healthCheck.status === 403)) {
+      console.warn('Token validation failed')
+      toast.warning('Posible problema de sesión', {
+        description: 'Si tenés problemas al iniciar turno, cerrá sesión y volvé a entrar.',
+        duration: 8000
+      })
     }
-  } catch (healthError) {
-    console.error('Health check failed:', healthError)
-    toast.warning('Problemas de conexión', {
-      description: 'Verificá tu conexión a internet. La app puede no funcionar correctamente.',
-      duration: 8000
-    })
-  }
+  }).catch(err => {
+    console.error('Health check failed:', err)
+  })
 
   // Detect system capabilities and adjust intervals for low-end hardware
   if (window.electronAPI?.screen?.getSystemCapabilities) {
