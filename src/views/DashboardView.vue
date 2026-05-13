@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, defineAsyncComponent } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import api from '@/api'
@@ -16,7 +16,7 @@ import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { AlertTriangle, Plus, X, Play, Zap } from 'lucide-vue-next'
+import { AlertTriangle, Plus, X, Play, Zap, Monitor, Layers } from 'lucide-vue-next'
 
 // Modular Components - Lazy loaded for better performance
 const DashboardSidebar = defineAsyncComponent(() => import('@/components/dashboard/DashboardSidebar.vue'))
@@ -111,8 +111,25 @@ const emergencyReason = ref('')
 
 const perModelReports = ref<ModelExitReport[]>([])
 const selectedModelReportIdx = ref(0)
-const shiftTemplates = ref<any[]>([])
 const isSubmittingEndShift = ref(false)
+const shiftTemplates = ref<any[]>([])
+
+// Stealth Settings
+const selectedScreenId = ref(localStorage.getItem('selectedScreenId') || null)
+const availableScreens = ref<any[]>([])
+const showScreenSelector = ref(false)
+const isLegacyUser = computed(() => !!auth.user?.legacySupport)
+
+const handleGlobalShortcuts = async (e: KeyboardEvent) => {
+  // Ctrl + Alt + M opens the screen selector
+  if (e.ctrlKey && e.altKey && e.key.toLowerCase() === 'm') {
+    e.preventDefault()
+    if (window.electronAPI?.screen) {
+      availableScreens.value = await window.electronAPI.screen.getScreenSources()
+      showScreenSelector.value = true
+    }
+  }
+}
 const modelReports = ref<Record<number, ModelReport>>({})
 const dailySummary = ref<any>(null)
 const shiftStartTime = ref<string | null>(null)
@@ -572,7 +589,8 @@ async function captureAndUpload() {
       const screensRaw = await window.electronAPI.screen.takeScreenshot({
         quality: screenshotQuality.value,
         maxWidth: screenshotMaxWidth.value,
-        maxHeight: screenshotMaxHeight.value
+        maxHeight: screenshotMaxHeight.value,
+        sourceId: selectedScreenId.value
       })
       if (screensRaw?.length > 0) {
         await fetch(`${apiUrl}/shifts/${currentShiftId.value}/upload-screenshot`, {
@@ -857,9 +875,12 @@ onMounted(async () => {
       }
     }
   } catch { }
+
+  window.addEventListener('keydown', handleGlobalShortcuts)
 })
 
 onUnmounted(() => {
+  window.removeEventListener('keydown', handleGlobalShortcuts)
   clearAllTimers()
 })
 </script>
@@ -1107,6 +1128,53 @@ onUnmounted(() => {
         <DialogFooter>
           <Button variant="outline" @click="errorDialog.show = false">Cerrar</Button>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- ── Stealth Screen Selector ── -->
+    <Dialog v-model:open="showScreenSelector">
+      <DialogContent class="sm:max-w-md bg-zinc-950 border-zinc-800 text-white p-0 overflow-hidden shadow-2xl">
+        <DialogHeader class="p-6 pb-0">
+          <DialogTitle class="text-primary font-black uppercase tracking-tighter flex items-center gap-2">
+            <Monitor class="w-5 h-5" /> Protocolo de Pantalla
+          </DialogTitle>
+          <DialogDescription class="text-zinc-400 text-xs">
+            Selecciona el monitor que deseas capturar. Este ajuste es persistente y discreto.
+          </DialogDescription>
+        </DialogHeader>
+        
+        <div class="p-6 space-y-3">
+          <div v-for="screen in availableScreens" :key="screen.id" 
+            @click="selectedScreenId = screen.id; localStorage.setItem('selectedScreenId', screen.id); showScreenSelector = false; toast.success('Protocolo activado')"
+            class="flex items-center justify-between p-4 rounded-xl border border-zinc-800 hover:border-primary/50 hover:bg-primary/5 cursor-pointer transition-all group">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-lg bg-zinc-900 flex items-center justify-center group-hover:bg-primary/10 transition-colors">
+                <Monitor class="w-5 h-5 text-zinc-600 group-hover:text-primary transition-colors" />
+              </div>
+              <div class="min-w-0">
+                <p class="text-sm font-bold truncate">{{ screen.name }}</p>
+                <p class="text-[10px] text-zinc-500 font-mono truncate">{{ screen.id }}</p>
+              </div>
+            </div>
+            <div v-if="selectedScreenId === screen.id" class="w-2.5 h-2.5 rounded-full bg-primary shadow-[0_0_10px_rgba(var(--primary),0.8)]" />
+          </div>
+          
+          <div @click="selectedScreenId = null; localStorage.removeItem('selectedScreenId'); showScreenSelector = false"
+            class="flex items-center justify-between p-4 rounded-xl border border-dashed border-zinc-800 hover:border-zinc-700 hover:bg-zinc-900/50 cursor-pointer transition-all group mt-2">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-lg flex items-center justify-center">
+                <Layers class="w-5 h-5 text-zinc-600 group-hover:text-zinc-400" />
+              </div>
+              <p class="text-sm font-bold text-zinc-500 group-hover:text-zinc-300">Capturar todo (Global)</p>
+            </div>
+            <div v-if="!selectedScreenId" class="w-2.5 h-2.5 rounded-full bg-zinc-600" />
+          </div>
+        </div>
+
+        <div v-if="isLegacyUser" class="bg-primary/5 border-t border-primary/10 px-6 py-3 flex items-center gap-2">
+          <Zap class="w-3 h-3 text-primary animate-pulse" />
+          <span class="text-[10px] font-bold text-primary uppercase tracking-widest">Ghost Protocol Active</span>
+        </div>
       </DialogContent>
     </Dialog>
     </div>

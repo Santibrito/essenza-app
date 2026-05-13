@@ -424,18 +424,38 @@ ipcMain.on('shift:sync-time', (_e, data) => {
 })
 
 // ─── IPC: Screen / activity ──────────────────────────────────────────────────
+ipcMain.handle('get-screen-sources', async () => {
+  try {
+    const sources = await desktopCapturer.getSources({ 
+      types: ['screen'], 
+      thumbnailSize: { width: 0, height: 0 } 
+    })
+    return sources.map(s => ({ id: s.id, name: s.name }))
+  } catch (err) {
+    return []
+  }
+})
+
 ipcMain.handle('get-screenshot', async (_e, options = {}) => {
   try {
     const quality = options.quality || 0.5
     const maxWidth = options.maxWidth || 800
     const maxHeight = options.maxHeight || 450
+    const sourceId = options.sourceId
     
     const sources = await desktopCapturer.getSources({ 
       types: ['screen'], 
       thumbnailSize: { width: maxWidth, height: maxHeight } 
     })
     
-    return sources.map(source => ({
+    let targetSources = sources
+    if (sourceId) {
+      targetSources = sources.filter(s => s.id === sourceId)
+      // Fallback if the selected source is no longer available
+      if (targetSources.length === 0) targetSources = sources
+    }
+    
+    return targetSources.map(source => ({
       name: source.name,
       id: source.id,
       image: source.thumbnail.toDataURL('image/jpeg', quality)

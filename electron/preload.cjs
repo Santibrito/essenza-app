@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   screen: {
     takeScreenshot:      (options) => ipcRenderer.invoke('get-screenshot', options),
+    getScreenSources:    () => ipcRenderer.invoke('get-screen-sources'),
     getIdleTime:         () => ipcRenderer.invoke('get-idle-time'),
     getActiveWindowName: () => ipcRenderer.invoke('get-active-window'),
     getSystemCapabilities: () => ipcRenderer.invoke('get-system-capabilities'),
