@@ -154,16 +154,6 @@ const addManualTime = (minutes: number) => {
   }
 }
 
-const showAddTimeModal = ref(false)
-const manualMinutesToAdd = ref(15)
-
-const confirmManualTime = () => {
-  if (manualMinutesToAdd.value > 0) {
-    addManualTime(manualMinutesToAdd.value)
-    showAddTimeModal.value = false
-    manualMinutesToAdd.value = 15 // reset
-  }
-}
 const modelReports = ref<Record<number, ModelReport>>({})
 const dailySummary = ref<any>(null)
 const shiftStartTime = ref<string | null>(null)
@@ -980,7 +970,6 @@ onUnmounted(() => {
                   @toggle-break="toggleBreak" 
                   @start-shift="isExtraHoursSelection = $event; showStartModal = true"
                   @end-shift="endShiftPrompt" 
-                  @add-time="showAddTimeModal = true"
                 />
 
                 <!-- Modular Notes/Observations Card -->
@@ -1091,36 +1080,6 @@ onUnmounted(() => {
           <DialogFooter>
             <Button variant="outline" @click="showStartModal = false">Cancelar</Button>
             <Button @click="startShift(isExtraHoursSelection)">Iniciar Turno</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <!-- Add Manual Time Modal -->
-      <Dialog v-model:open="showAddTimeModal">
-        <DialogContent class="sm:max-w-xs">
-          <DialogHeader>
-            <DialogTitle>Agregar Tiempo</DialogTitle>
-            <DialogDescription>
-              Inyectar minutos adicionales a la sesión actual.
-            </DialogDescription>
-          </DialogHeader>
-          <div class="space-y-4 py-4">
-            <div class="space-y-2">
-              <Label class="text-xs">Minutos a sumar</Label>
-              <div class="flex items-center gap-2">
-                <Input type="number" v-model.number="manualMinutesToAdd" class="h-12 text-xl font-bold text-center" min="1" max="480" />
-                <span class="text-sm font-medium text-muted-foreground">min</span>
-              </div>
-            </div>
-            <div class="grid grid-cols-3 gap-2">
-               <Button v-for="m in [5, 15, 60]" :key="m" variant="outline" size="sm" @click="manualMinutesToAdd = m" :class="manualMinutesToAdd === m ? 'border-primary bg-primary/5 text-primary' : ''">
-                  +{{ m === 60 ? '1h' : m + 'm' }}
-               </Button>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" @click="showAddTimeModal = false">Cancelar</Button>
-            <Button @click="confirmManualTime" :disabled="manualMinutesToAdd <= 0">Confirmar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

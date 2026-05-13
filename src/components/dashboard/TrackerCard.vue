@@ -222,10 +222,6 @@ const assignedEnd = computed(() => {
             <component :is="isPaused ? Play : Coffee" class="w-4 h-4 mr-2" />
             {{ isPaused ? 'Retomar' : 'Break' }}
           </Button>
-          <Button variant="outline" size="sm" class="h-9 px-4 border-border/80 text-blue-500 hover:text-blue-600 hover:bg-blue-500/5" @click="emit('addTime')">
-            <Plus class="w-4 h-4 mr-2" />
-            Agregar Tiempo
-          </Button>
           <Button variant="destructive" size="sm" class="h-9 px-4  text-white" @click="emit('endShift')">
             Terminar
           </Button>
