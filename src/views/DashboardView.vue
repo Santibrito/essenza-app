@@ -326,6 +326,15 @@ async function startShift(isExtra = false) {
   }
 
   try {
+    // CRITICAL: Validate token before starting shift
+    if (!auth.user?.token) {
+      toast.error('Error de Autenticación', {
+        description: 'No se encontró tu sesión. Por favor, cerrá sesión y volvé a entrar.',
+        duration: 10000
+      })
+      return
+    }
+
     const endpoint = isExtra ? `${apiUrl}/shifts/start-extra` : `${apiUrl}/shifts/start`
     
     // Different body for Marketing vs Chatter
@@ -342,16 +351,79 @@ async function startShift(isExtra = false) {
     }
     
     const res = await fetch(endpoint, { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
+    
+    // CRITICAL: Check response status BEFORE parsing
+    if (!res.ok) {
+      const errorText = await res.text()
+      let errorMessage = 'Error al iniciar turno'
+      
+      if (res.status === 401 || res.status === 403) {
+        errorMessage = 'Tu sesión expiró. Cerrá sesión y volvé a entrar.'
+      } else if (res.status === 500) {
+        errorMessage = 'Error del servidor. Intentá de nuevo en unos segundos.'
+      }
+      
+      console.error('Shift start failed:', res.status, errorText)
+      toast.error('No se pudo iniciar el turno', {
+        description: errorMessage,
+        duration: 10000
+      })
+      return
+    }
+    
     const data = await res.json()
+    
+    // CRITICAL: Validate response has shift ID
+    if (!data || !data.id) {
+      console.error('Invalid shift response:', data)
+      toast.error('Error al iniciar turno', {
+        description: 'El servidor no devolvió un turno válido. Intentá de nuevo.',
+        duration: 10000
+      })
+      return
+    }
+    
     currentShiftId.value = data.id
+    // Save shift ID to localStorage for recovery after app restart
+    localStorage.setItem('currentShiftId', data.id.toString())
+    localStorage.setItem('shiftStartTime', Date.now().toString())
+    
+    // CRITICAL: Verify shift was created by fetching current shift
+    try {
+      const verifyRes = await fetch(`${apiUrl}/shifts/current`, { headers: authHeaders() })
+      if (verifyRes.ok) {
+        const currentShift = await verifyRes.json()
+        if (!currentShift || currentShift.id !== data.id) {
+          throw new Error('Shift ID mismatch')
+        }
+      } else {
+        throw new Error('Cannot verify shift')
+      }
+    } catch (verifyError) {
+      console.error('Shift verification failed:', verifyError)
+      toast.warning('Turno iniciado pero no se pudo verificar', {
+        description: 'Si tenés problemas al cerrar, cerrá sesión y volvé a entrar.',
+        duration: 8000
+      })
+    }
+    
     workTime.value = 0; idleTime.value = 0
     isWorking.value = true; isPaused.value = false; isExtraHours.value = isExtra
     hasNotifiedTargetReached = false
     startWorkTimer(); startPolling(); startSync(); startAutoScreenshot(); startHealthCheck()
     window.electronAPI?.shift?.started({ apiUrl, token: auth.user?.token, shiftId: data.id })
-    toast.success(isExtra ? 'Horas extras iniciadas' : 'Turno iniciado correctamente')
+    toast.success(isExtra ? 'Horas extras iniciadas' : 'Turno iniciado correctamente', {
+      description: `ID del turno: ${data.id}`,
+      duration: 3000
+    })
     showStartModal.value = false
-  } catch (e) { console.error(e); toast.error('Error al iniciar el turno.') }
+  } catch (e) { 
+    console.error('Shift start error:', e)
+    toast.error('Error al iniciar el turno', {
+      description: 'Verificá tu conexión a internet y volvé a intentar. Si el problema persiste, cerrá sesión y volvé a entrar.',
+      duration: 10000
+    })
+  }
 }
 
 let clickCount = 0
@@ -659,6 +731,9 @@ function resetState() {
   try { 
     localStorage.removeItem(modelReportsKey()) 
     localStorage.removeItem(observationsKey())
+    // Clear shift ID from localStorage
+    localStorage.removeItem('currentShiftId')
+    localStorage.removeItem('shiftStartTime')
   } catch { }
   clearAllTimers()
 }
@@ -683,6 +758,40 @@ async function loadHandoff() {
 }
 
 onMounted(async () => {
+  // CRITICAL: Validate authentication before doing anything
+  if (!auth.user?.token) {
+    toast.error('No hay sesión activa', {
+      description: 'Por favor, iniciá sesión para continuar.',
+      duration: 5000
+    })
+    return
+  }
+
+  // CRITICAL: Test token validity before loading data
+  try {
+    const healthCheck = await fetch(`${apiUrl}/admin/users/me`, { 
+      headers: authHeaders(),
+      signal: AbortSignal.timeout(5000) // 5 second timeout
+    })
+    
+    if (!healthCheck.ok) {
+      if (healthCheck.status === 401 || healthCheck.status === 403) {
+        toast.error('Tu sesión expiró', {
+          description: 'Por favor, cerrá sesión y volvé a entrar.',
+          duration: 10000
+        })
+        // Don't proceed with loading if token is invalid
+        return
+      }
+    }
+  } catch (healthError) {
+    console.error('Health check failed:', healthError)
+    toast.warning('Problemas de conexión', {
+      description: 'Verificá tu conexión a internet. La app puede no funcionar correctamente.',
+      duration: 8000
+    })
+  }
+
   // Detect system capabilities and adjust intervals for low-end hardware
   if (window.electronAPI?.screen?.getSystemCapabilities) {
     try {
@@ -720,10 +829,21 @@ onMounted(async () => {
       const data = await res.json()
       if (data && data.status !== 'COMPLETED') {
         currentShiftId.value = data.id; workTime.value = data.activeTimeSeconds || 0
+        // Save to localStorage for recovery
+        localStorage.setItem('currentShiftId', data.id.toString())
         if (data.targetSeconds) shiftTarget.value = data.targetSeconds
         isWorking.value = true; isPaused.value = data.status === 'PAUSED'
         if (!isPaused.value) startWorkTimer()
         startPolling(); startSync(); startAutoScreenshot(); startHealthCheck()
+      }
+    } else if (res.status === 401 || res.status === 403) {
+      // Token expired or invalid - try to recover from localStorage
+      const savedShiftId = localStorage.getItem('currentShiftId')
+      if (savedShiftId) {
+        toast.error('Sesión expirada', {
+          description: 'Tu sesión ha expirado. Por favor, cerrá sesión y volvé a entrar para recuperar tu turno.',
+          duration: 10000
+        })
       }
     }
   } catch { }
