@@ -80,6 +80,10 @@ export const useAuthStore = defineStore('auth', () => {
           'Authorization': `Bearer ${user.value.token}`
         }
       })
+      if (res.status === 401 || res.status === 403) {
+        logout()
+        return
+      }
       if (res.ok) {
         const data = await res.json()
         user.value = { 

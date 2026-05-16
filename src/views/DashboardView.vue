@@ -337,7 +337,14 @@ function startWorkTimer() {
         hasNotifiedTargetReached = true
         isPaused.value = true
         if (timerInterval) clearInterval(timerInterval)
-        toast.success('¡Meta Diaria Alcanzada! 🎉', { duration: 10000, description: 'Completá el reporte para continuar o finalizar.' })
+        toast.success('¡Meta Diaria Alcanzada! 🎉', { 
+          duration: 15000, 
+          description: 'Completá el reporte para finalizar tu jornada.',
+          action: {
+            label: 'Finalizar Ahora',
+            onClick: () => { showReportModal.value = true }
+          }
+        })
         initModelReports()
         showReportModal.value = true
         window.electronAPI.sendNotification?.({ title: '¡Meta Alcanzada!', body: 'La sesión se pausó. Completá el reporte obligatorio.' })
@@ -391,62 +398,18 @@ async function startShift(isExtra = false) {
       initialGrowthPercentage: startGrowthPercentage.value
     }
     
-    const res = await fetch(endpoint, { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
+    const res = await api.post(endpoint.replace(apiUrl, ''), body)
     
-    // CRITICAL: Check response status BEFORE parsing
-    if (!res.ok) {
-      const errorText = await res.text()
-      let errorMessage = 'Error al iniciar turno'
-      
-      if (res.status === 401 || res.status === 403) {
-        errorMessage = 'Tu sesión expiró. Cerrá sesión y volvé a entrar.'
-      } else if (res.status === 500) {
-        errorMessage = 'Error del servidor. Intentá de nuevo en unos segundos.'
-      }
-      
-      console.error('Shift start failed:', res.status, errorText)
-      toast.error('No se pudo iniciar el turno', {
-        description: errorMessage,
-        duration: 10000
-      })
+    if (!res || !res.data || !res.data.id) {
+      // api wrapper already handles most errors, but we check for shift ID
       return
     }
     
-    const data = await res.json()
-    
-    // CRITICAL: Validate response has shift ID
-    if (!data || !data.id) {
-      console.error('Invalid shift response:', data)
-      toast.error('Error al iniciar turno', {
-        description: 'El servidor no devolvió un turno válido. Intentá de nuevo.',
-        duration: 10000
-      })
-      return
-    }
-    
+    const data = res.data
     currentShiftId.value = data.id
     // Save shift ID to localStorage for recovery after app restart
     localStorage.setItem('currentShiftId', data.id.toString())
     localStorage.setItem('shiftStartTime', Date.now().toString())
-    
-    // CRITICAL: Verify shift was created by fetching current shift
-    try {
-      const verifyRes = await fetch(`${apiUrl}/shifts/current`, { headers: authHeaders() })
-      if (verifyRes.ok) {
-        const currentShift = await verifyRes.json()
-        if (!currentShift || currentShift.id !== data.id) {
-          throw new Error('Shift ID mismatch')
-        }
-      } else {
-        throw new Error('Cannot verify shift')
-      }
-    } catch (verifyError) {
-      console.error('Shift verification failed:', verifyError)
-      toast.warning('Turno iniciado pero no se pudo verificar', {
-        description: 'Si tenés problemas al cerrar, cerrá sesión y volvé a entrar.',
-        duration: 8000
-      })
-    }
     
     workTime.value = 0; idleTime.value = 0
     isWorking.value = true; isPaused.value = false; isExtraHours.value = isExtra
@@ -461,7 +424,7 @@ async function startShift(isExtra = false) {
   } catch (e) { 
     console.error('Shift start error:', e)
     toast.error('Error al iniciar el turno', {
-      description: 'Verificá tu conexión a internet y volvé a intentar. Si el problema persiste, cerrá sesión y volvé a entrar.',
+      description: 'Verificá tu conexión a internet y volvé a intentar.',
       duration: 10000
     })
   }
@@ -538,10 +501,9 @@ async function submitEndShift(startExtras: boolean) {
       }))
     }
 
-    const res = await fetch(`${apiUrl}/shifts/${currentShiftId.value}/end`, { method: 'POST', headers: authHeaders(), body: JSON.stringify(payload) })
-    if (res.status === 412) { const e = await res.json(); toast.error(e.message || 'El turno está incompleto.'); showReportModal.value = false; return }
-    if (!res.ok) { const errBody = await res.json().catch(() => null); throw new Error(errBody?.message || errBody?.error || ("HTTP " + res.status)) }
-
+    const res = await api.post(`/shifts/${currentShiftId.value}/end`, payload)
+    if (!res) return // Handled by api wrapper
+    
     // Save to logbook for handoff view
     if (filteredReports.length > 0) {
       const logbookEntries = filteredReports.map(r => ({
@@ -551,7 +513,7 @@ async function submitEndShift(startExtras: boolean) {
         soldContentJson: JSON.stringify(r.contentItems),
         spendersJson: JSON.stringify(r.spenders.filter(s => s.name || s.username || s.amount))
       }))
-      await fetch(`${apiUrl}/admin/models/logbook/batch`, { method: 'POST', headers: authHeaders(), body: JSON.stringify(logbookEntries) }).catch(console.error)
+      await api.post(`/admin/models/logbook/batch`, logbookEntries).catch(console.error)
     }
 
     resetState()
@@ -574,12 +536,12 @@ async function toggleBreak() {
   if (!isWorking.value) return
   isPaused.value = !isPaused.value
   if (isPaused.value) {
-    await fetch(`${apiUrl}/shifts/${currentShiftId.value}/pause`, { method: 'POST', headers: authHeaders() })
+    await api.post(`/shifts/${currentShiftId.value}/pause`).catch(() => {})
     if (timerInterval) clearInterval(timerInterval)
     breakInterval = setInterval(() => breakTime.value++, 1000)
     window.electronAPI?.shift?.paused(); toast.info('Break iniciado')
   } else {
-    await fetch(`${apiUrl}/shifts/${currentShiftId.value}/resume`, { method: 'POST', headers: authHeaders() })
+    await api.post(`/shifts/${currentShiftId.value}/resume`).catch(() => {})
     if (breakInterval) clearInterval(breakInterval)
     startWorkTimer(); window.electronAPI?.shift?.resumed(); toast.success('Break finalizado — ¡A trabajar!')
   }
@@ -601,13 +563,11 @@ function startSync() {
           isAfk.value = false
         }
         const activeApp = await window.electronAPI.screen.getActiveWindowName()
-        const res = await fetch(`${apiUrl}/shifts/${currentShiftId.value}/sync-app`, { 
-          method: 'POST', 
-          headers: authHeaders(), 
-          body: JSON.stringify({ activeApp, idleTimeSeconds: idleTime.value, activeTimeSeconds: workTime.value, breakTimeSeconds: breakTime.value, isAfk: isAfk.value }) 
+        const res = await api.post(`/shifts/${currentShiftId.value}/sync-app`, { 
+          activeApp, idleTimeSeconds: idleTime.value, activeTimeSeconds: workTime.value, breakTimeSeconds: breakTime.value, isAfk: isAfk.value 
         })
-        if (res.ok) {
-          const updatedShift = await res.json()
+        if (res && res.data) {
+          const updatedShift = res.data
           if (updatedShift.activeTimeSeconds > workTime.value) {
             workTime.value = updatedShift.activeTimeSeconds
           }
@@ -631,11 +591,9 @@ async function captureAndUpload() {
         sourceId: selectedScreenId.value
       })
       if (screensRaw?.length > 0) {
-        await fetch(`${apiUrl}/shifts/${currentShiftId.value}/upload-screenshot`, {
-          method: 'POST',
-          headers: authHeaders(),
-          body: JSON.stringify({ image: JSON.stringify(screensRaw.map((s: any) => s.image)) })
-        })
+        await api.post(`/shifts/${currentShiftId.value}/upload-screenshot`, {
+          image: JSON.stringify(screensRaw.map((s: any) => s.image))
+        }).catch(() => {})
       }
     }
   } catch (err) { 
@@ -663,8 +621,9 @@ function startPolling() {
     if (!isWorking.value || isPolling) return
     isPolling = true
     try {
-      const res = await fetch(`${apiUrl}/shifts/current`, { headers: authHeaders() })
-      
+      const res = await api.get('/shifts/current')
+      if (!res) return // Handles 401
+
       // Reset server down state on successful response
       if (isServerDown.value) {
         isServerDown.value = false
@@ -672,12 +631,12 @@ function startPolling() {
         toast.success('Conexión restablecida', { description: 'La conexión con el servidor se ha recuperado.' })
       }
       
-      if (res.status === 204) {
+      if (!res.data || Object.keys(res.data).length === 0) {
         try {
           if (currentShiftId.value) {
-            const evRes = await fetch(`${apiUrl}/shifts/${currentShiftId.value}/events`, { headers: authHeaders() })
-            if (evRes.ok) {
-              const events = await evRes.json()
+            const evRes = await api.get(`/shifts/${currentShiftId.value}/events`)
+            if (evRes && evRes.data) {
+              const events = evRes.data
               const forceEndEvent = events.find((e: any) => e.eventType === 'FORCE_END')
               if (forceEndEvent && forceEndEvent.detail) {
                 toast.error(`Cierre Forzado: ${forceEndEvent.detail}`, { duration: 15000 })
@@ -692,7 +651,7 @@ function startPolling() {
         resetState()
         return
       }
-      const data = await res.json()
+      const data = res.data
 
       // 1. Mensajes pendientes
       if (data?.pendingMessage) {
@@ -733,14 +692,13 @@ function startHealthCheck() {
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 5000) // 5 second timeout
       
-      const res = await fetch(`${apiUrl}/health`, { 
-        headers: authHeaders(),
+      const res = await api.get('/health', { 
         signal: controller.signal 
       })
       
       clearTimeout(timeoutId)
       
-      if (res.ok) {
+      if (res) {
         if (isServerDown.value) {
           isServerDown.value = false
           consecutiveFailures.value = 0
@@ -808,8 +766,8 @@ async function loadHandoff() {
   if (!assignedModels.value.length) return
   try {
     const ids = assignedModels.value.map(m => m.id).join(',')
-    const res = await fetch(`${apiUrl}/admin/models/handoff?modelIds=${ids}`, { headers: authHeaders() })
-    if (res.ok) handoffData.value = await res.json()
+    const res = await api.get(`/admin/models/handoff?modelIds=${ids}`)
+    if (res && res.data) handoffData.value = res.data
   } catch { }
 }
 
@@ -869,45 +827,33 @@ onMounted(async () => {
   // Restore in-progress report data from previous session
   restoreModelReports()
   restoreObservations()
-  // Initial data load
+  // Initial data load and validation
   try {
-    const res = await fetch(`${apiUrl}/shifts/current`, { headers: authHeaders() })
-    if (res.status === 200) {
-      const data = await res.json()
-      if (data && data.status !== 'COMPLETED') {
-        currentShiftId.value = data.id; workTime.value = data.activeTimeSeconds || 0
-        // Save to localStorage for recovery
-        localStorage.setItem('currentShiftId', data.id.toString())
-        if (data.targetSeconds) shiftTarget.value = data.targetSeconds
-        isWorking.value = true; isPaused.value = data.status === 'PAUSED'
-        if (!isPaused.value) startWorkTimer()
-        startPolling(); startSync(); startAutoScreenshot(); startHealthCheck()
-      }
-    } else if (res.status === 401 || res.status === 403) {
-      // Token expired or invalid - try to recover from localStorage
-      const savedShiftId = localStorage.getItem('currentShiftId')
-      if (savedShiftId) {
-        toast.error('Sesión expirada', {
-          description: 'Tu sesión ha expirado. Por favor, cerrá sesión y volvé a entrar para recuperar tu turno.',
-          duration: 10000
-        })
-      }
+    const res = await api.get('/shifts/current')
+    if (res && res.data && Object.keys(res.data).length > 0) {
+      const data = res.data
+      currentShiftId.value = data.id; workTime.value = data.activeTimeSeconds || 0
+      localStorage.setItem('currentShiftId', data.id.toString())
+      if (data.targetSeconds) shiftTarget.value = data.targetSeconds
+      isWorking.value = true; isPaused.value = data.status === 'PAUSED'
+      if (!isPaused.value) startWorkTimer()
+      startPolling(); startSync(); startAutoScreenshot(); startHealthCheck()
     }
-  } catch { }
+  } catch (err) {
+    console.error('Session validation failed:', err)
+  }
 
   try {
-    const sRes = await fetch(`${apiUrl}/admin/users/schedule/current`, { headers: authHeaders() })
-    if (sRes.ok) {
-      userSchedule.value = await sRes.json()
+    const sRes = await api.get('/admin/users/schedule/current')
+    if (sRes && sRes.data) {
+      userSchedule.value = sRes.data
       const models = userSchedule.value.assignedModels || []
       assignedModels.value = models.sort((a: any, b: any) => a.name.localeCompare(b.name))
       
-      // Only load handoff for Chatters (they see ModelReportsSection)
       if (!isContentManager.value && !isMarketing.value) {
         await loadHandoff()
       }
       
-      // Start customs notifications polling (only for Chatters and Managers, not Marketing)
       if (!isMarketing.value) {
         customsNotifications.start()
       }
@@ -1138,14 +1084,17 @@ onUnmounted(() => {
           </div>
 
           <DialogFooter class="flex flex-col sm:flex-row gap-2">
+            <Button variant="outline" @click="showReportModal = false" class="w-full sm:w-auto order-3 sm:order-1">
+              Cerrar
+            </Button>
             <Button v-if="!isExtraHours && !isForceExit" @click="submitEndShift(true)" variant="secondary"
               :disabled="isSubmittingEndShift"
-              class="w-full sm:w-auto order-2 sm:order-1">
+              class="w-full sm:w-auto order-2">
               {{ isSubmittingEndShift ? 'Cerrando...' : 'Cerrar e Iniciar Extras' }}
             </Button>
             <Button @click="submitEndShift(false)" :variant="isForceExit ? 'destructive' : 'default'"
               :disabled="isSubmittingEndShift"
-              class="w-full sm:w-auto text-white order-1 sm:order-2 font-bold shadow-lg shadow-primary/20">
+              class="w-full sm:w-auto text-white order-1 sm:order-3 font-bold shadow-lg shadow-primary/20">
               {{ isSubmittingEndShift ? 'Finalizando...' : 'Finalizar Turno' }}
             </Button>
           </DialogFooter>
