@@ -23,6 +23,7 @@ async function request(path, options = {}) {
   
   const headers = {
     'Content-Type': 'application/json',
+    // Prevent caching at HTTP level
     'Cache-Control': 'no-cache, no-store, must-revalidate',
     'Pragma': 'no-cache',
     'Expires': '0',
@@ -33,52 +34,42 @@ async function request(path, options = {}) {
     headers['Authorization'] = `Bearer ${auth.user.token}`
   }
 
-  try {
-    const response = await fetch(`${apiUrl}${path}`, {
-      ...options,
-      headers
+  const response = await fetch(`${apiUrl}${path}`, {
+    ...options,
+    headers
+  })
+
+  if (response.status === 401) {
+    auth.logout()
+    return
+  }
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}))
+    throw error
+  }
+
+  const result = { data: await response.json().catch(() => ({})) }
+  
+  // Cache GET requests
+  if (cacheKey) {
+    requestCache.set(cacheKey, {
+      data: result,
+      timestamp: Date.now()
     })
-
-    // CRITICAL: Handle session expiration globally
-    if (response.status === 401 || response.status === 403) {
-      console.error('Session expired or invalid (401/403). Forcing logout.')
-      auth.logout()
-      // Use window.location to force a hard redirect to login
-      if (window.location.hash !== '#/login') {
-        window.location.href = '#/login'
-      }
-      return null
-    }
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ message: `HTTP Error ${response.status}` }))
-      throw errorData
-    }
-
-    // Success - parse JSON
-    const data = await response.json().catch(() => ({}))
-    const result = { data }
     
-    // Cache GET requests
-    if (cacheKey) {
-      requestCache.set(cacheKey, {
-        data: result,
-        timestamp: Date.now()
-      })
-      
-      if (requestCache.size > 50) {
-        const now = Date.now()
-        for (const [key, value] of requestCache.entries()) {
-          if (now - value.timestamp > CACHE_TTL) requestCache.delete(key)
+    // Clean old cache entries periodically
+    if (requestCache.size > 50) {
+      const now = Date.now()
+      for (const [key, value] of requestCache.entries()) {
+        if (now - value.timestamp > CACHE_TTL) {
+          requestCache.delete(key)
         }
       }
     }
-    
-    return result
-  } catch (error) {
-    console.error(`API Request Error [${path}]:`, error)
-    throw error
   }
+  
+  return result
 }
 
 // Clear cache on logout
@@ -91,6 +82,5 @@ export default {
   post: (path, data, options) => request(path, { ...options, method: 'POST', body: JSON.stringify(data) }),
   put: (path, data, options) => request(path, { ...options, method: 'PUT', body: JSON.stringify(data) }),
   delete: (path, options) => request(path, { ...options, method: 'DELETE' }),
-  patch: (path, data, options) => request(path, { ...options, method: 'PATCH', body: JSON.stringify(data) }),
-  request // Export the base request for custom needs
+  patch: (path, data, options) => request(path, { ...options, method: 'PATCH', body: JSON.stringify(data) })
 }

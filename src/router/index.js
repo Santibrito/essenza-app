@@ -25,12 +25,25 @@ const router = createRouter({
   routes,
 })
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   const auth = useAuthStore()
 
-  if (to.meta.requiresAuth && !auth.isAuthenticated) {
-    return { name: 'login' }
+  if (to.meta.requiresAuth) {
+    // No user at all → login
+    if (!auth.isAuthenticated) {
+      return { name: 'login' }
+    }
+
+    // User exists but token not yet validated this session → validate with server
+    if (!auth.isSessionValidated) {
+      const isValid = await auth.validateSession()
+      if (!isValid) {
+        return { name: 'login' }
+      }
+    }
   }
+
+  // Already authenticated → skip login page
   if (to.name === 'login' && auth.isAuthenticated) {
     return { name: 'dashboard' }
   }

@@ -6,6 +6,7 @@ export const useAuthStore = defineStore('auth', () => {
   const user = ref(null)
   const isLoading = ref(false)
   const error = ref(null)
+  const isSessionValidated = ref(false)
 
   const isAuthenticated = computed(() => !!user.value)
 
@@ -13,7 +14,13 @@ export const useAuthStore = defineStore('auth', () => {
   const savedUser = localStorage.getItem('user')
   if (savedUser) {
     try {
-      user.value = JSON.parse(savedUser)
+      const parsed = JSON.parse(savedUser)
+      // Basic sanity check: must have token and id
+      if (parsed && parsed.token && parsed.id) {
+        user.value = parsed
+      } else {
+        localStorage.removeItem('user')
+      }
     } catch {
       localStorage.removeItem('user')
     }
@@ -80,10 +87,6 @@ export const useAuthStore = defineStore('auth', () => {
           'Authorization': `Bearer ${user.value.token}`
         }
       })
-      if (res.status === 401 || res.status === 403) {
-        logout()
-        return
-      }
       if (res.ok) {
         const data = await res.json()
         user.value = { 
@@ -126,13 +129,78 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  /**
+   * Validate the stored token against the server.
+   * Returns true if the session is valid, false otherwise.
+   * On failure, cleans up and returns false (does NOT auto-logout to avoid loops).
+   */
+  async function validateSession() {
+    if (!user.value?.token) {
+      isSessionValidated.value = false
+      return false
+    }
+
+    try {
+      const apiUrl = import.meta.env.VITE_API_BASE_URL || 'https://crm-app.up.railway.app/api/v1'
+      const res = await fetch(`${apiUrl}/admin/users/me`, {
+        headers: {
+          'Authorization': `Bearer ${user.value.token}`,
+          'Cache-Control': 'no-cache'
+        },
+        signal: AbortSignal.timeout(8000)
+      })
+
+      if (res.ok) {
+        // Token is valid — optionally refresh profile data
+        const data = await res.json()
+        user.value = {
+          ...user.value,
+          name: data.name,
+          shiftTargetSeconds: data.shiftTargetSeconds,
+          breakTargetSeconds: data.breakTargetSeconds,
+          timezone: data.timezone || user.value.timezone,
+          profilePictureUrl: data.profilePictureUrl,
+          profilePictureBase64: data.profilePictureBase64
+        }
+        localStorage.setItem('user', JSON.stringify(user.value))
+        isSessionValidated.value = true
+        return true
+      }
+
+      if (res.status === 401 || res.status === 403) {
+        // Token expired or revoked — clean up
+        console.warn('[Auth] Token invalid (HTTP', res.status, '). Cleaning session.')
+        user.value = null
+        localStorage.removeItem('user')
+        isSessionValidated.value = false
+        return false
+      }
+
+      // Other errors (500, network) — don't invalidate, could be transient
+      console.warn('[Auth] Validation got non-auth error:', res.status)
+      isSessionValidated.value = true
+      return true
+    } catch (err) {
+      // Network error — assume session is still valid (offline tolerance)
+      console.warn('[Auth] Validation failed (network):', err)
+      isSessionValidated.value = true
+      return true
+    }
+  }
+
   function logout() {
     user.value = null
     error.value = null
-    localStorage.removeItem('user')
+    isSessionValidated.value = false
     
-    // Clear all localStorage and sessionStorage
-    localStorage.clear()
+    // Remove auth-specific keys (NOT localStorage.clear() which nukes shift recovery data)
+    localStorage.removeItem('user')
+    localStorage.removeItem('currentShiftId')
+    localStorage.removeItem('shiftStartTime')
+    localStorage.removeItem('essenza_model_reports')
+    localStorage.removeItem('essenza_observations')
+    localStorage.removeItem('selectedScreenId')
+    localStorage.removeItem('afkOverride')
     sessionStorage.clear()
     
     // Clear API cache
@@ -166,5 +234,5 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.setItem('user', JSON.stringify(user.value))
   }
 
-  return { user, isAuthenticated, isLoading, error, login, logout, clearError, changePassword, updateTimezone, updateProfilePicture, refreshUserProfile }
+  return { user, isAuthenticated, isSessionValidated, isLoading, error, login, logout, clearError, changePassword, updateTimezone, updateProfilePicture, refreshUserProfile, validateSession }
 })
