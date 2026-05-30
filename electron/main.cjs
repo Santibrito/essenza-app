@@ -438,9 +438,9 @@ ipcMain.handle('get-screen-sources', async () => {
 
 ipcMain.handle('get-screenshot', async (_e, options = {}) => {
   try {
-    const quality = options.quality || 0.5
-    const maxWidth = options.maxWidth || 800
-    const maxHeight = options.maxHeight || 450
+    const quality = options.quality || 0.8
+    const maxWidth = options.maxWidth || 1280
+    const maxHeight = options.maxHeight || 720
     const sourceId = options.sourceId
     
     const sources = await desktopCapturer.getSources({ 

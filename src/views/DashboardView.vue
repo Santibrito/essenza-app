@@ -36,6 +36,7 @@ const CustomsList = defineAsyncComponent(() => import('@/components/customs/Cust
 const CreateCustomModal = defineAsyncComponent(() => import('@/components/customs/CreateCustomModal.vue'))
 const ContentManagerKanban = defineAsyncComponent(() => import('@/components/customs/ContentManagerKanban.vue'))
 const ShiftModelReport = defineAsyncComponent(() => import('@/components/dashboard/ShiftModelReport.vue'))
+const PublicationsCalendar = defineAsyncComponent(() => import('@/components/dashboard/PublicationsCalendar.vue'))
 import { useCustomsNotifications } from '@/lib/useCustomsNotifications'
 
 // Types
@@ -89,7 +90,7 @@ const userOffDays = ref('')
 const shiftTarget = ref<number>(0)
 const assignedModels = ref<AssignedModel[]>([])
 const modelsHistory = ref<Record<number, HistoryEntry[]>>({})
-const activeTab = ref<'tracker' | 'history' | 'crm' | 'creative' | 'context' | 'customs'>('tracker')
+const activeTab = ref<'tracker' | 'history' | 'crm' | 'creative' | 'context' | 'customs' | 'publications'>('tracker')
 const showCreateCustom = ref(false)
 const customsNotifications = useCustomsNotifications(() => assignedModels.value.map((m: any) => m.id))
 const sidebarOpen = ref(false)
@@ -1043,6 +1044,11 @@ onUnmounted(() => {
                 />
                 <CreateCustomModal v-model:open="showCreateCustom" :models="assignedModels" @created="() => {}" />
               </template>
+            </template>
+
+            <!-- Case: PUBLICACIONES (Marketing only) -->
+            <template v-else-if="activeTab === 'publications'">
+              <PublicationsCalendar :assigned-models="assignedModels" />
             </template>
 
           </div>
