@@ -15,6 +15,7 @@ export interface ScheduledPublication {
   contentType: ContentType
   caption: string
   hashtags: string
+  customLink: string
   scheduledAt: string
   status: PublicationStatus
   mediaUrl: string
@@ -29,6 +30,7 @@ export interface CreatePublicationPayload {
   contentType: ContentType
   caption?: string
   hashtags?: string
+  customLink?: string
   scheduledAt: string // ISO datetime
 }
 

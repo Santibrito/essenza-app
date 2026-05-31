@@ -113,11 +113,13 @@ const createLoading = ref(false)
 
 // Form state
 const form = ref({
+  modelId:     null as number | null,
   modelName:   '',
   platform:    'INSTAGRAM' as SocialPlatform,
   contentType: 'REEL' as ContentType,
   caption:     '',
   hashtags:    '',
+  customLink:  '',
   date:        '',
   time:        '09:00',
 })
@@ -129,6 +131,16 @@ const availableContentTypes = computed(() =>
   PLATFORM_CONTENT_TYPES[form.value.platform]
 )
 
+// Computed: ¿El tipo de contenido actual necesita caption/hashtags?
+const needsCaptionAndHashtags = computed(() => {
+  return form.value.contentType === 'REEL' || form.value.contentType === 'TIKTOK' || form.value.contentType === 'POST'
+})
+
+// Computed: ¿El tipo de contenido actual necesita link personalizado?
+const needsCustomLink = computed(() => {
+  return form.value.contentType === 'STORY'
+})
+
 // Reset content type when platform changes
 watch(() => form.value.platform, (p) => {
   const types = PLATFORM_CONTENT_TYPES[p]
@@ -137,14 +149,23 @@ watch(() => form.value.platform, (p) => {
   }
 })
 
+// Update modelName when modelId changes
+watch(() => form.value.modelId, (id) => {
+  const model = props.assignedModels?.find(m => m.id === id)
+  form.value.modelName = model?.name || ''
+})
+
 function openCreateModal(date?: Date) {
   // Reset form
+  const firstModel = props.assignedModels?.[0]
   form.value = {
-    modelName:   props.assignedModels?.[0]?.name ?? '',
+    modelId:     firstModel?.id ?? null,
+    modelName:   firstModel?.name ?? '',
     platform:    'INSTAGRAM',
     contentType: 'REEL',
     caption:     '',
     hashtags:    '',
+    customLink:  '',
     date:        date ? formatDateInput(date) : formatDateInput(today),
     time:        '09:00',
   }
@@ -191,8 +212,8 @@ async function submitCreate() {
     toast.error('Seleccioná un archivo')
     return
   }
-  if (!form.value.modelName.trim()) {
-    toast.error('Ingresá el nombre de la modelo')
+  if (!form.value.modelId || !form.value.modelName.trim()) {
+    toast.error('Seleccioná una modelo')
     return
   }
   if (!form.value.date || !form.value.time) {
@@ -206,8 +227,9 @@ async function submitCreate() {
     modelName:   form.value.modelName.trim(),
     platform:    form.value.platform,
     contentType: form.value.contentType,
-    caption:     form.value.caption || undefined,
-    hashtags:    form.value.hashtags || undefined,
+    caption:     needsCaptionAndHashtags.value ? (form.value.caption || undefined) : undefined,
+    hashtags:    needsCaptionAndHashtags.value ? (form.value.hashtags || undefined) : undefined,
+    customLink:  needsCustomLink.value ? (form.value.customLink || undefined) : undefined,
     scheduledAt,
   }
 
@@ -449,6 +471,13 @@ function platformColor(platform: SocialPlatform) {
               {{ pub.caption }}
             </p>
 
+            <!-- Custom Link preview -->
+            <div v-if="pub.customLink" class="flex items-center gap-1.5 text-[10px] text-blue-600 dark:text-blue-400">
+              <a :href="pub.customLink" target="_blank" class="truncate hover:underline font-medium">
+                {{ pub.customLink }}
+              </a>
+            </div>
+
             <!-- Error -->
             <div v-if="pub.errorMessage" class="flex items-start gap-1.5 bg-red-500/10 rounded-lg p-2">
               <AlertTriangle class="w-3 h-3 text-red-500 shrink-0 mt-0.5" />
@@ -483,14 +512,20 @@ function platformColor(platform: SocialPlatform) {
 
       <div class="space-y-4 py-2">
 
-        <!-- Modelo -->
+        <!-- Modelo (Select de modelos asignadas) -->
         <div class="space-y-1.5">
           <Label class="text-xs font-bold uppercase tracking-wide text-zinc-500">Modelo</Label>
-          <Input
-            v-model="form.modelName"
-            placeholder="Nombre de la modelo"
-            class="h-10"
-          />
+          <select
+            v-model="form.modelId"
+            class="w-full h-10 rounded-md border border-input bg-background px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            <option v-if="!assignedModels || assignedModels.length === 0" :value="null" disabled>
+              No tenés modelos asignadas
+            </option>
+            <option v-for="model in assignedModels" :key="model.id" :value="model.id">
+              {{ model.alias || model.name }}
+            </option>
+          </select>
         </div>
 
         <!-- Plataforma + Tipo -->
@@ -579,8 +614,8 @@ function platformColor(platform: SocialPlatform) {
           </div>
         </div>
 
-        <!-- Caption -->
-        <div class="space-y-1.5">
+        <!-- Caption (solo para Reel, TikTok, Post) -->
+        <div v-if="needsCaptionAndHashtags" class="space-y-1.5">
           <Label class="text-xs font-bold uppercase tracking-wide text-zinc-500">Caption <span class="text-zinc-400 font-normal normal-case">(opcional)</span></Label>
           <Textarea
             v-model="form.caption"
@@ -590,14 +625,27 @@ function platformColor(platform: SocialPlatform) {
           />
         </div>
 
-        <!-- Hashtags -->
-        <div class="space-y-1.5">
+        <!-- Hashtags (solo para Reel, TikTok, Post) -->
+        <div v-if="needsCaptionAndHashtags" class="space-y-1.5">
           <Label class="text-xs font-bold uppercase tracking-wide text-zinc-500">Hashtags <span class="text-zinc-400 font-normal normal-case">(opcional)</span></Label>
           <Input
             v-model="form.hashtags"
             placeholder="#verano #lifestyle #modelo"
             class="h-10 text-sm"
           />
+        </div>
+
+        <!-- Link personalizado (solo para Story) -->
+        <div v-if="needsCustomLink" class="space-y-1.5">
+          <Label class="text-xs font-bold uppercase tracking-wide text-zinc-500">Link Personalizado <span class="text-zinc-400 font-normal normal-case">(opcional)</span></Label>
+          <Input
+            v-model="form.customLink"
+            placeholder="https://onlyfans.com/modelo"
+            class="h-10 text-sm"
+          />
+          <p class="text-[10px] text-zinc-400 leading-relaxed">
+            Este link se agregará a la historia. Dejalo vacío si no querés agregar ninguno.
+          </p>
         </div>
 
       </div>
