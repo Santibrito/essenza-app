@@ -31,6 +31,7 @@ export interface CreatePublicationPayload {
   caption?: string
   hashtags?: string
   customLink?: string
+  accountId?: number // ID de la cuenta de AdsPower vinculada
   scheduledAt: string // ISO datetime
 }
 
@@ -85,6 +86,14 @@ export function usePublications() {
     return res.json()
   }
 
+  async function getAccountsByModel(modelId: number): Promise<any[]> {
+    const res = await fetch(`${apiUrl}/automation/profiles/by-model/${modelId}/accounts`, {
+      headers: authHeaders()
+    })
+    if (!res.ok) throw new Error('Error al cargar perfiles/cuentas de la modelo')
+    return res.json()
+  }
+
   async function create(
     payload: CreatePublicationPayload,
     file: File
@@ -129,5 +138,5 @@ export function usePublications() {
     return res.json()
   }
 
-  return { loading, getCalendar, create, cancel }
+  return { loading, getCalendar, getAccountsByModel, create, cancel }
 }

@@ -111,12 +111,17 @@ function selectDay(day: { date: Date | null; pubs: ScheduledPublication[] }) {
 const showCreateModal = ref(false)
 const createLoading = ref(false)
 
+// Accounts list for selected model
+const accountsLoading = ref(false)
+const modelAccounts = ref<any[]>([])
+
 // Form state
 const form = ref({
   modelId:     null as number | null,
   modelName:   '',
   platform:    'INSTAGRAM' as SocialPlatform,
   contentType: 'REEL' as ContentType,
+  accountId:   null as number | null,
   caption:     '',
   hashtags:    '',
   customLink:  '',
@@ -131,6 +136,13 @@ const availableContentTypes = computed(() =>
   PLATFORM_CONTENT_TYPES[form.value.platform]
 )
 
+// Accounts filtered by platform
+const filteredAccounts = computed(() => {
+  return modelAccounts.value.filter(
+    acc => acc.platform === form.value.platform
+  )
+})
+
 // Computed: ¿El tipo de contenido actual necesita caption/hashtags?
 const needsCaptionAndHashtags = computed(() => {
   return form.value.contentType === 'REEL' || form.value.contentType === 'TIKTOK' || form.value.contentType === 'POST'
@@ -141,18 +153,51 @@ const needsCustomLink = computed(() => {
   return form.value.contentType === 'STORY'
 })
 
-// Reset content type when platform changes
+// Fetch AdsPower accounts for selected model
+async function fetchModelAccounts(modelId: number) {
+  accountsLoading.value = true
+  modelAccounts.value = []
+  form.value.accountId = null
+  try {
+    const { getAccountsByModel } = usePublications()
+    modelAccounts.value = await getAccountsByModel(modelId)
+    // Auto-select first account if available for current platform
+    const matching = modelAccounts.value.filter(acc => acc.platform === form.value.platform)
+    if (matching.length > 0) {
+      form.value.accountId = matching[0].accountId
+    }
+  } catch (e: any) {
+    toast.error('Error al cargar cuentas de la modelo', { description: e.message })
+  } finally {
+    accountsLoading.value = false
+  }
+}
+
+// Reset content type and select account when platform changes
 watch(() => form.value.platform, (p) => {
   const types = PLATFORM_CONTENT_TYPES[p]
   if (!types.includes(form.value.contentType)) {
     form.value.contentType = types[0]
   }
+  // Auto-select matching account for new platform
+  const matching = filteredAccounts.value
+  if (matching.length > 0) {
+    form.value.accountId = matching[0].accountId
+  } else {
+    form.value.accountId = null
+  }
 })
 
-// Update modelName when modelId changes
+// Update modelName & fetch accounts when modelId changes
 watch(() => form.value.modelId, (id) => {
   const model = props.assignedModels?.find(m => m.id === id)
   form.value.modelName = model?.name || ''
+  if (id) {
+    fetchModelAccounts(id)
+  } else {
+    modelAccounts.value = []
+    form.value.accountId = null
+  }
 })
 
 function openCreateModal(date?: Date) {
@@ -163,6 +208,7 @@ function openCreateModal(date?: Date) {
     modelName:   firstModel?.name ?? '',
     platform:    'INSTAGRAM',
     contentType: 'REEL',
+    accountId:   null,
     caption:     '',
     hashtags:    '',
     customLink:  '',
@@ -172,6 +218,10 @@ function openCreateModal(date?: Date) {
   selectedFile.value = null
   filePreview.value  = null
   showCreateModal.value = true
+
+  if (firstModel?.id) {
+    fetchModelAccounts(firstModel.id)
+  }
 }
 
 function formatDateInput(d: Date) {
@@ -216,6 +266,10 @@ async function submitCreate() {
     toast.error('Seleccioná una modelo')
     return
   }
+  if (!form.value.accountId) {
+    toast.error('Seleccioná un usuario/perfil de esa red social')
+    return
+  }
   if (!form.value.date || !form.value.time) {
     toast.error('Seleccioná fecha y hora')
     return
@@ -227,6 +281,7 @@ async function submitCreate() {
     modelName:   form.value.modelName.trim(),
     platform:    form.value.platform,
     contentType: form.value.contentType,
+    accountId:   form.value.accountId,
     caption:     needsCaptionAndHashtags.value ? (form.value.caption || undefined) : undefined,
     hashtags:    needsCaptionAndHashtags.value ? (form.value.hashtags || undefined) : undefined,
     customLink:  needsCustomLink.value ? (form.value.customLink || undefined) : undefined,
@@ -551,6 +606,26 @@ function platformColor(platform: SocialPlatform) {
               </option>
             </select>
           </div>
+        </div>
+
+        <!-- Cuenta/Usuario de Red Social (AdsPower) -->
+        <div class="space-y-1.5">
+          <div class="flex items-center justify-between">
+            <Label class="text-xs font-bold uppercase tracking-wide text-zinc-500">Cuenta de Red Social / Perfil</Label>
+            <span v-if="accountsLoading" class="text-[10px] text-zinc-400 font-medium animate-pulse">Cargando cuentas...</span>
+          </div>
+          <select
+            v-model="form.accountId"
+            :disabled="accountsLoading || !form.modelId"
+            class="w-full h-10 rounded-md border border-input bg-background px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+          >
+            <option :value="null" disabled>
+              {{ form.modelId ? (filteredAccounts.length > 0 ? 'Seleccioná una cuenta...' : 'No hay cuentas activas registradas para esta plataforma') : 'Primero seleccioná una modelo' }}
+            </option>
+            <option v-for="acc in filteredAccounts" :key="acc.accountId" :value="acc.accountId">
+              @{{ acc.handle }} (Perfil: {{ acc.profileName }} · AdsPower: {{ acc.adsPowerId }})
+            </option>
+          </select>
         </div>
 
         <!-- Fecha + Hora -->
