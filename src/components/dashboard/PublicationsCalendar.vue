@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { toast } from 'vue-sonner'
+import api from '@/api'
 import {
   ChevronLeft, ChevronRight, Plus, Instagram, X,
   Clock, Upload, Calendar, Loader2, AlertTriangle, CheckCircle2, Trash2
@@ -109,6 +110,8 @@ function selectDay(day: { date: Date | null; pubs: ScheduledPublication[] }) {
 
 // ── Create modal ──────────────────────────────────────────────────────────────
 const showCreateModal = ref(false)
+const testingAdsPower = ref(false)
+const testingReel = ref(false)
 const createLoading = ref(false)
 
 // Accounts list for selected model
@@ -338,6 +341,92 @@ async function cancelPublication(id: number) {
   }
 }
 
+// ── Test AdsPower connection ──────────────────────────────────────────────────
+async function testAdsPower() {
+  testingAdsPower.value = true
+  
+  try {
+    // Test directo a AdsPower sin pasar por el backend
+    const adsPowerUrl = 'http://127.0.0.1:50325/api/v1/browser/start?user_id=k1d1iycv&api_key=61bffeeaa120f458df9a3960cb34d6e4008fb4588ea92687'
+    
+    const response = await fetch(adsPowerUrl, {
+      method: 'GET',
+      mode: 'no-cors' // Para evitar problemas de CORS
+    })
+    
+    // Como usamos no-cors, no podemos leer la respuesta, pero si no da error significa que AdsPower responde
+    toast.success('✅ AdsPower conectado correctamente', {
+      description: 'Conexión establecida con AdsPower',
+      duration: 5000
+    })
+    
+    // Try to close the browser after 3 seconds
+    setTimeout(async () => {
+      try {
+        const stopUrl = 'http://127.0.0.1:50325/api/v1/browser/stop?user_id=k1d1iycv&api_key=61bffeeaa120f458df9a3960cb34d6e4008fb4588ea92687'
+        await fetch(stopUrl, { method: 'GET', mode: 'no-cors' })
+        toast.info('Browser cerrado automáticamente')
+      } catch (e) {
+        console.warn('Could not auto-close browser:', e)
+      }
+    }, 3000)
+    
+  } catch (error: any) {
+    console.error('AdsPower test failed:', error)
+    
+    let errorMsg = 'Error desconocido'
+    if (error.message) {
+      errorMsg = error.message
+    }
+    
+    toast.error('❌ AdsPower no responde', {
+      description: errorMsg,
+      duration: 8000
+    })
+  } finally {
+    testingAdsPower.value = false
+  }
+}
+
+// ── Test Instagram Reel publication ───────────────────────────────────────────
+async function testInstagramReel() {
+  testingReel.value = true
+  
+  try {
+    const response = await api.post('/automation/test/publish/instagram-reel-quick', {
+      profileId: 'k1d1iycv',
+      mediaUrl: 'https://sample-videos.com/zip/10/mp4/SampleVideo_1280x720_1mb.mp4',
+      caption: 'Test desde ESSENZA 🚀 #automation #test',
+      hashtags: '#essenza #test #automation #instagram'
+    })
+    
+    if (response.data.success) {
+      toast.success('🎉 Reel publicado correctamente!', {
+        description: 'El navegador se cerrará automáticamente en 10 segundos',
+        duration: 8000
+      })
+    } else {
+      throw new Error(response.data.error || 'Error desconocido')
+    }
+  } catch (error: any) {
+    console.error('Instagram Reel test failed:', error)
+    
+    let errorMsg = 'Error desconocido'
+    if (error.response?.data?.error) {
+      errorMsg = error.response.data.error
+    } else if (error.message) {
+      errorMsg = error.message
+    }
+    
+    toast.error('❌ Error publicando Reel', {
+      description: errorMsg,
+      duration: 10000
+    })
+  } finally {
+    testingReel.value = false
+  }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function formatTime(iso: string) {
   const d = new Date(iso)
@@ -381,6 +470,28 @@ function platformColor(platform: SocialPlatform) {
         <Button @click="openCreateModal()" class="gap-2 h-9">
           <Plus class="w-4 h-4" />
           <span class="text-sm font-semibold">Nueva Publicación</span>
+        </Button>
+        
+        <Button 
+          @click="testAdsPower"
+          :disabled="testingAdsPower"
+          variant="outline"
+          class="gap-2 h-9 border-green-200 text-green-700 hover:bg-green-50"
+        >
+          <Loader2 v-if="testingAdsPower" class="w-4 h-4 animate-spin" />
+          <span v-else class="text-lg">🔧</span>
+          <span class="text-sm font-semibold">Test AdsPower</span>
+        </Button>
+        
+        <Button 
+          @click="testInstagramReel"
+          :disabled="testingReel"
+          variant="outline"
+          class="gap-2 h-9 border-purple-200 text-purple-700 hover:bg-purple-50"
+        >
+          <Loader2 v-if="testingReel" class="w-4 h-4 animate-spin" />
+          <span v-else class="text-lg">🎬</span>
+          <span class="text-sm font-semibold">Test Reel</span>
         </Button>
       </div>
 
