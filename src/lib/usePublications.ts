@@ -1,8 +1,7 @@
 import { ref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { toast } from 'vue-sonner'
-
-const apiUrl = import.meta.env.VITE_API_BASE_URL || 'https://crm-app.up.railway.app/api/v1'
+import { API_BASE_URL as apiUrl } from '@/config.js'
 
 export type SocialPlatform = 'INSTAGRAM' | 'TIKTOK'
 export type ContentType = 'REEL' | 'STORY' | 'TIKTOK' | 'POST'

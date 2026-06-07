@@ -22,7 +22,7 @@ autoUpdater.autoDownload = true
 autoUpdater.autoInstallOnAppQuit = true
 autoUpdater.allowPrerelease = false
 autoUpdater.allowDowngrade = false
-autoUpdater.logger = require('electron').app ? null : null
+autoUpdater.logger = null // usamos console.log propio en los handlers
 
 // Check for updates every 30 minutes
 const UPDATE_CHECK_INTERVAL = 30 * 60 * 1000
@@ -50,21 +50,34 @@ autoUpdater.on('download-progress', (progress) => {
   mainWindow?.webContents.send('updater:progress', { percent })
 })
 
+// Si hay un turno activo NO instalamos: quitAndInstall() cerraría la app y
+// cortaría el turno del empleado. Queda pendiente y se instala al cerrar el
+// turno (ver shift:stopped) o al salir de la app (autoInstallOnAppQuit).
+let updatePendingInstall = false
+
+function installUpdateIfIdle(reason) {
+  if (app.isQuitting) return
+  if (isShiftActive) {
+    console.log(`[AutoUpdater] Update pendiente (${reason}): turno activo, se instala al cerrar el turno`)
+    return
+  }
+  if (!updatePendingInstall) return
+  console.log(`[AutoUpdater] Instalando update (${reason})...`)
+  updatePendingInstall = false
+  autoUpdater.quitAndInstall()
+}
+
 autoUpdater.on('update-downloaded', (info) => {
   console.log('[AutoUpdater] Update downloaded:', info.version)
-  mainWindow?.webContents.send('updater:status', { 
-    type: 'ready', 
+  updatePendingInstall = true
+  mainWindow?.webContents.send('updater:status', {
+    type: 'ready',
     info,
     message: `Versión ${info.version} lista. Se instalará al cerrar la app.`
   })
   
-  // Auto-install after 5 seconds if no user interaction
-  setTimeout(() => {
-    if (!app.isQuitting) {
-      console.log('[AutoUpdater] Auto-installing update...')
-      autoUpdater.quitAndInstall()
-    }
-  }, 5000)
+  // Auto-instala a los 5s SOLO si no hay turno activo.
+  setTimeout(() => installUpdateIfIdle('auto'), 5000)
 })
 
 autoUpdater.on('error', (err) => {
@@ -324,13 +337,21 @@ let backgroundSyncData = {
   isPaused: false
 }
 
+// Heartbeat de ventana activa desde el main process.
+// IMPORTANTE: este sync envía SOLO `activeApp`. El renderer (ShiftManager) es la
+// ÚNICA fuente de verdad de los contadores de tiempo (activeTime/idle/break), que
+// calcula con la máquina de estados completa (trabajo/pausa/AFK). Antes el main
+// también mandaba activeTimeSeconds (el cronómetro de bandeja, que cuenta durante
+// la pausa) e idleTimeSeconds (idle instantáneo), y el backend los combinaba con el
+// renderer → corrompía el tiempo efectivo y el AFK. Ahora el main solo reporta qué
+// app está en foco mientras la ventana está oculta, sin tocar los contadores.
 async function performBackgroundSync() {
   if (!isShiftActive || backgroundSyncData.isPaused || !backgroundSyncData.token || !backgroundSyncData.shiftId) return
 
   try {
     const { net } = require('electron')
     const url = `${backgroundSyncData.apiUrl}/shifts/${backgroundSyncData.shiftId}/sync-app`
-    
+
     // Get active app name from main process (more reliable)
     let activeApp = 'Sistema'
     try {
@@ -341,21 +362,15 @@ async function performBackgroundSync() {
       }
     } catch {}
 
-    const idleTimeSeconds = powerMonitor.getSystemIdleTime()
-
     const request = net.request({
       method: 'POST',
       url: url,
     })
     request.setHeader('Authorization', `Bearer ${backgroundSyncData.token}`)
     request.setHeader('Content-Type', 'application/json')
-    
-    const payload = JSON.stringify({
-      activeApp,
-      idleTimeSeconds,
-      activeTimeSeconds: shiftTimerSeconds
-    })
-    
+
+    const payload = JSON.stringify({ activeApp })
+
     request.on('error', (err) => console.error('BG Sync Network Error:', err))
     request.write(payload)
     request.end()
@@ -385,7 +400,8 @@ ipcMain.on('shift:started', (_e, data) => {
       clearInterval(shiftTimerInterval)
       return
     }
-    shiftTimerSeconds++
+    // No sumar durante la pausa para que el cronómetro de bandeja coincida con el real
+    if (!backgroundSyncData.isPaused) shiftTimerSeconds++
     updateTrayTooltip()
   }, 1000)
 })
@@ -399,8 +415,15 @@ ipcMain.on('shift:stopped', () => {
     clearInterval(shiftTimerInterval)
     shiftTimerInterval = null
   }
-  
+
   updateTrayTooltip()
+
+  // Si quedó un update descargado durante el turno, instalarlo ahora.
+  // Damos 30s de gracia por si el usuario cierra para iniciar horas extras
+  // (installUpdateIfIdle re-chequea isShiftActive antes de instalar).
+  if (updatePendingInstall) {
+    setTimeout(() => installUpdateIfIdle('post-turno'), 30000)
+  }
 })
 
 ipcMain.on('shift:paused', () => {
@@ -411,15 +434,15 @@ ipcMain.on('shift:resumed', () => {
   backgroundSyncData.isPaused = false
 })
 
-// Renderer can push the current seconds for resuming a recovered shift
+// Renderer can push the current seconds for resuming a recovered shift.
+// SOLO acepta los segundos del cronómetro (cosmético, para la bandeja).
+// Credenciales/shiftId entran únicamente por shift:started — antes este canal
+// permitía pisar token/apiUrl/shiftId desde DevTools.
 ipcMain.on('shift:sync-time', (_e, data) => {
-  if (typeof data === 'number') {
-    shiftTimerSeconds = data
-  } else if (data && typeof data === 'object') {
-    shiftTimerSeconds = data.seconds || shiftTimerSeconds
-    if (data.token) backgroundSyncData.token = data.token
-    if (data.apiUrl) backgroundSyncData.apiUrl = data.apiUrl
-    if (data.shiftId) backgroundSyncData.shiftId = data.shiftId
+  const seconds = typeof data === 'number' ? data : data?.seconds
+  if (typeof seconds === 'number' && Number.isFinite(seconds) && seconds >= 0) {
+    shiftTimerSeconds = Math.floor(seconds)
+    updateTrayTooltip()
   }
 })
 

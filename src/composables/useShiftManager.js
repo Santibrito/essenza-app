@@ -7,6 +7,7 @@ import { ref, reactive, readonly, onMounted, onUnmounted, computed } from 'vue'
 import { toast } from 'vue-sonner'
 import ShiftManager from '@/lib/ShiftManager.js'
 import { useAuthStore } from '@/stores/auth'
+import { API_BASE_URL } from '@/config.js'
 
 export function useShiftManager() {
   const auth = useAuthStore()
@@ -36,7 +37,7 @@ export function useShiftManager() {
   })
   
   // Configuración de API
-  const apiUrl = import.meta.env.VITE_API_BASE_URL || 'https://crm-app.up.railway.app/api/v1'
+  const apiUrl = API_BASE_URL
   
   const authHeaders = () => ({
     'Authorization': `Bearer ${auth.user?.token}`,
@@ -46,7 +47,25 @@ export function useShiftManager() {
   // Callbacks para el ShiftManager
   const callbacks = {
     onStateChange: (newState) => {
+      const wasWorking = state.isWorking
       Object.assign(state, newState)
+
+      // Mantener al main process (bandeja + heartbeat) en sync con el estado real.
+      // Esto cubre también la RECUPERACIÓN de turno tras reiniciar la app:
+      // antes la bandeja quedaba en "Sin turno activo" y el heartbeat no corría.
+      if (!wasWorking && state.isWorking && state.currentShiftId) {
+        window.electronAPI?.shift?.started?.({
+          apiUrl,
+          token: auth.user?.token,
+          shiftId: state.currentShiftId
+        })
+        // Turno recuperado: empujar los segundos acumulados al cronómetro de bandeja
+        if (state.workTime > 0) {
+          window.electronAPI?.shift?.syncTime?.({ seconds: state.workTime })
+        }
+      } else if (wasWorking && !state.isWorking) {
+        window.electronAPI?.shift?.stopped?.()
+      }
     },
     
     onNotification: (type, title, message) => {
@@ -61,6 +80,13 @@ export function useShiftManager() {
     onError: (error) => {
       ui.lastError = error
       console.error('ShiftManager error:', error)
+    },
+
+    // La sesión expiró (HTTP 401): cerramos sesión para mandar al login.
+    // auth.logout() limpia el estado y recarga; al re-loguear, el turno activo
+    // se recupera del servidor y el usuario puede cerrarlo con un token fresco.
+    onAuthExpired: () => {
+      auth.logout()
     }
   }
   
@@ -103,18 +129,10 @@ export function useShiftManager() {
       if (!result.success) {
         throw new Error(result.error)
       }
-      
-      // Notificar a Electron
-      if (window.electronAPI?.shift?.started) {
-        window.electronAPI.shift.started({
-          apiUrl,
-          token: auth.user?.token,
-          shiftId: result.shift.id
-        })
-      }
-      
+
+      // (la notificación a Electron la hace onStateChange al pasar a isWorking)
       return result
-      
+
     } catch (error) {
       ui.lastError = error.message
       throw error
@@ -131,22 +149,19 @@ export function useShiftManager() {
     
     try {
       const result = await shiftManager.endShift(reportData, force)
-      
+
       if (!result.success) {
-        if (result.code === 'INCOMPLETE') {
-          // Turno incompleto - devolver error específico
+        if (result.code === 'INCOMPLETE' || result.code === 'AUTH') {
+          // Turno incompleto o sesión expirada - devolver sin lanzar.
+          // (AUTH ya disparó logout/redirect vía onAuthExpired)
           return result
         }
         throw new Error(result.error)
       }
-      
-      // Notificar a Electron
-      if (window.electronAPI?.shift?.stopped) {
-        window.electronAPI.shift.stopped()
-      }
-      
+
+      // (la notificación a Electron la hace onStateChange al dejar de trabajar)
       return result
-      
+
     } catch (error) {
       ui.lastError = error.message
       throw error
@@ -188,18 +203,6 @@ export function useShiftManager() {
   }
   
   // Métodos de utilidad
-  const addManualTime = (minutes) => {
-    const secondsToAdd = minutes * 60
-    state.workTime += secondsToAdd
-    
-    toast.success(`Tiempo agregado: +${minutes} minutos`)
-    
-    // Sincronizar con Electron
-    if (window.electronAPI?.shift?.syncTime) {
-      window.electronAPI.shift.syncTime(state.workTime)
-    }
-  }
-  
   const forceSync = async () => {
     try {
       await shiftManager.syncWithServer()
@@ -311,7 +314,6 @@ export function useShiftManager() {
     startShift,
     endShift,
     toggleBreak,
-    addManualTime,
     forceSync,
     recoverShift,
     formatTime,

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { clearApiCache } from '../api.js'
+import { API_BASE_URL as apiUrl } from '../config.js'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref(null)
@@ -34,7 +35,6 @@ export const useAuthStore = defineStore('auth', () => {
     error.value = null
 
     try {
-      const apiUrl = import.meta.env.VITE_API_BASE_URL || 'https://crm-app.up.railway.app/api/v1'
       const res = await fetch(`${apiUrl}/auth/login`, {
         method: 'POST',
         headers: {
@@ -81,7 +81,6 @@ export const useAuthStore = defineStore('auth', () => {
   async function refreshUserProfile() {
     if (!user.value) return
     try {
-      const apiUrl = import.meta.env.VITE_API_BASE_URL || 'https://crm-app.up.railway.app/api/v1'
       const res = await fetch(`${apiUrl}/admin/users/me`, {
         headers: {
           'Authorization': `Bearer ${user.value.token}`
@@ -109,7 +108,6 @@ export const useAuthStore = defineStore('auth', () => {
     isLoading.value = true
     error.value = null
     try {
-      const apiUrl = import.meta.env.VITE_API_BASE_URL || 'https://crm-app.up.railway.app/api/v1'
       const res = await fetch(`${apiUrl}/admin/users/me/change-password`, {
         method: 'PUT',
         headers: {
@@ -141,7 +139,6 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     try {
-      const apiUrl = import.meta.env.VITE_API_BASE_URL || 'https://crm-app.up.railway.app/api/v1'
       const res = await fetch(`${apiUrl}/admin/users/me`, {
         headers: {
           'Authorization': `Bearer ${user.value.token}`,

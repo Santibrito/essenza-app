@@ -328,7 +328,7 @@ interface Stats {
 
 const props = defineProps<{ modelId: number }>()
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'https://crm-app.up.railway.app/api/v1'
+import { API_BASE_URL as API_BASE } from '@/config.js'
 const webBaseUrl = import.meta.env.VITE_WEB_URL ?? 'https://essenzamodels.com'
 const token = computed(() => localStorage.getItem('token') ?? '')
 

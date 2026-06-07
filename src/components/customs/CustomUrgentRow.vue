@@ -10,7 +10,7 @@ const emit = defineEmits(['open'])
 
 // User names cache
 const userNamesCache = ref({})
-const apiUrl = import.meta.env.VITE_API_BASE_URL || 'https://crm-app.up.railway.app/api/v1'
+import { API_BASE_URL as apiUrl } from '@/config.js'
 
 // Función para obtener el nombre real de un usuario por username
 async function fetchUserRealName(username) {

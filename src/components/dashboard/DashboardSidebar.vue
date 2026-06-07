@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import {
   Radio, History, Users, Lightbulb, ClipboardCheck,
-  LogOut, X, ChevronRight, Settings, Calendar, Package
+  LogOut, X, ChevronRight, Settings, Calendar, Package, BarChart3
 } from 'lucide-vue-next'
 import { ref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import ProfileSettingsSheet from '@/components/dashboard/ProfileSettingsSheet.vue'
 import packageJson from '../../../package.json'
 
-type TabType = 'tracker' | 'history' | 'crm' | 'creative' | 'context' | 'customs' | 'publications'
+type TabType = 'tracker' | 'history' | 'crm' | 'creative' | 'context' | 'customs' | 'publications' | 'marketing'
 
 const props = defineProps<{
   activeTab: TabType
@@ -42,6 +42,7 @@ const sections = [
     label: 'Estrategia Agency',
     items: [
       { id: 'customs' as TabType, label: props.isContentManager ? 'Gestión de Customs' : 'Customs', icon: Package, color: 'text-teal-500', bg: 'bg-teal-500/10', show: !props.isMarketing },
+      { id: 'marketing' as TabType, label: 'Métricas Sociales', icon: BarChart3, color: 'text-indigo-500', bg: 'bg-indigo-500/10', show: props.isMarketing },
       { id: 'crm' as TabType, label: 'Gestión de Leads', icon: Users, color: 'text-violet-500', bg: 'bg-violet-500/10', show: props.isMarketing },
       { id: 'creative' as TabType, label: 'Muro Creativo', icon: Lightbulb, color: 'text-amber-500', bg: 'bg-amber-500/10', show: props.isMarketing },
       { id: 'publications' as TabType, label: 'Publicaciones', icon: Calendar, color: 'text-pink-500', bg: 'bg-pink-500/10', show: props.isMarketing },

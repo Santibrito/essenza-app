@@ -49,9 +49,13 @@ class ShiftManager {
     this.callbacks = {
       onStateChange: null,
       onError: null,
-      onNotification: null
+      onNotification: null,
+      onAuthExpired: null
     }
-    
+
+    // Evita disparar el flujo de "sesión expirada" más de una vez
+    this._authExpiredHandled = false
+
     this.apiUrl = null
     this.authHeaders = null
     
@@ -125,9 +129,12 @@ class ShiftManager {
         this.state.isPaused = shift.status === 'PAUSED'
         this.state.isExtraHours = shift.isExtraHours || false
         this.state.shiftStartTime = shift.startTime
-        this.state.workTime = shift.activeTimeSeconds || 0
         this.state.breakTime = shift.breakTimeSeconds || 0
         this.state.idleTime = shift.idleTimeSeconds || 0
+        // activeTimeSeconds del servidor es EFECTIVO (sin AFK). Reconstruimos el
+        // workTime BRUTO sumándole el idle para que effectiveWorkSeconds vuelva a
+        // dar el valor correcto y no se reste el AFK dos veces.
+        this.state.workTime = (shift.activeTimeSeconds || 0) + this.state.idleTime
         
         if (this.state.isWorking) {
           this.notify('info', 'Shift recuperado', `Continuando turno #${shift.id}`)
@@ -164,7 +171,11 @@ class ShiftManager {
     try {
       const endpoint = isExtra ? '/shifts/start-extra' : '/shifts/start'
       const response = await this.makeRequest(endpoint, 'POST', initialData)
-      
+
+      if (response.status === 401) {
+        return { success: false, error: 'Tu sesión expiró. Volvé a iniciar sesión.', code: 'AUTH' }
+      }
+
       if (!response.ok) {
         const error = await this.parseError(response)
         throw new Error(error)
@@ -251,7 +262,12 @@ class ShiftManager {
       }
       
       const response = await this.makeRequest(`/shifts/${this.state.currentShiftId}/end`, 'POST', payload)
-      
+
+      if (response.status === 401) {
+        this.locks.ending = false
+        return { success: false, error: 'Tu sesión expiró. Volvé a iniciar sesión para cerrar el turno.', code: 'AUTH' }
+      }
+
       if (response.status === 412) {
         // Precondition failed - shift incomplete
         const error = await response.json()
@@ -296,7 +312,11 @@ class ShiftManager {
     try {
       const endpoint = this.state.isPaused ? 'resume' : 'pause'
       const response = await this.makeRequest(`/shifts/${this.state.currentShiftId}/${endpoint}`, 'POST')
-      
+
+      if (response.status === 401) {
+        return { success: false, error: 'Tu sesión expiró. Volvé a iniciar sesión.', code: 'AUTH' }
+      }
+
       if (!response.ok) {
         const error = await this.parseError(response)
         throw new Error(error)
@@ -432,10 +452,15 @@ class ShiftManager {
             this.notifyStateChange()
           }
           
+          // El tiempo que cuenta para la meta del turno es el EFECTIVO
+          // (trabajado − AFK). Antes mandábamos workTime (incluía el AFK), por lo
+          // que el AFK no descontaba realmente del cierre. Ahora el AFK sí resta.
+          const effectiveSeconds = Math.max(0, this.state.workTime - this.state.idleTime)
+
           systemData = {
             activeApp,
             idleTimeSeconds: this.state.idleTime,
-            activeTimeSeconds: this.state.workTime,
+            activeTimeSeconds: effectiveSeconds,
             breakTimeSeconds: this.state.breakTime,
             isAfk: this.state.isAfk
           }
@@ -448,18 +473,24 @@ class ShiftManager {
       
       if (response.ok) {
         const updatedShift = await response.json()
-        
-        // Sincronizar tiempos con el servidor (el servidor es la fuente de verdad)
-        if (updatedShift.activeTimeSeconds > this.state.workTime) {
-          this.state.workTime = updatedShift.activeTimeSeconds
+
+        // Reconciliación con el servidor (fuente de verdad si tiene más tiempo).
+        // OJO: el servidor guarda activeTimeSeconds como tiempo EFECTIVO (ya sin AFK),
+        // mientras que localmente llevamos workTime BRUTO. Para no doble-restar el AFK,
+        // reconstruimos el bruto como efectivo_servidor + idle local.
+        if (updatedShift.idleTimeSeconds > this.state.idleTime) {
+          this.state.idleTime = updatedShift.idleTimeSeconds
+        }
+        if (typeof updatedShift.activeTimeSeconds === 'number') {
+          const localEffective = Math.max(0, this.state.workTime - this.state.idleTime)
+          if (updatedShift.activeTimeSeconds > localEffective) {
+            this.state.workTime = updatedShift.activeTimeSeconds + this.state.idleTime
+          }
         }
         if (updatedShift.breakTimeSeconds > this.state.breakTime) {
           this.state.breakTime = updatedShift.breakTimeSeconds
         }
-        if (updatedShift.idleTimeSeconds > this.state.idleTime) {
-          this.state.idleTime = updatedShift.idleTimeSeconds
-        }
-        
+
         this.state.lastSyncTime = Date.now()
         this.persistState()
         this.notifyStateChange()
@@ -557,8 +588,13 @@ class ShiftManager {
       }
       
       const response = await fetch(`${this.apiUrl}${endpoint}`, options)
+      // 401 = token ausente/expirado (el backend ahora devuelve 401, no 403).
+      // Disparamos el flujo de re-login una sola vez.
+      if (response.status === 401) {
+        this.handleAuthExpired()
+      }
       return response
-      
+
     } catch (e) {
       if (retries < this.config.maxRetries) {
         console.warn(`Request failed, retrying (${retries + 1}/${this.config.maxRetries}):`, e)
@@ -569,6 +605,21 @@ class ShiftManager {
     }
   }
   
+  /**
+   * Maneja una sesión expirada (HTTP 401). Detiene los timers y avisa al
+   * contenedor (composable) para que cierre sesión y mande al login. Se ejecuta
+   * una sola vez por instancia para no spamear logout/reload.
+   */
+  handleAuthExpired() {
+    if (this._authExpiredHandled) return
+    this._authExpiredHandled = true
+    this.stopAllTimers()
+    this.notify('error', 'Sesión expirada', 'Tu sesión venció. Iniciá sesión de nuevo para continuar.')
+    if (this.callbacks.onAuthExpired) {
+      this.callbacks.onAuthExpired()
+    }
+  }
+
   /**
    * Parsea errores de respuesta HTTP
    */

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import {
-  Target, Clock, AlertTriangle, Coffee, Info
+  Target, Clock, AlertTriangle, Coffee, Info, Moon
 } from 'lucide-vue-next'
 import { Card, CardContent } from '@/components/ui/card'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -38,7 +38,7 @@ const dailyDebtSeconds = computed(() => {
 
 <template>
   <TooltipProvider :delay-duration="100">
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
       <Card v-for="k in [
         {
           l: 'Rendimiento',
@@ -53,8 +53,16 @@ const dailyDebtSeconds = computed(() => {
           v: formatTime(workTime),
           c: 'text-blue-500',
           i: Clock,
-          sub: 'Tiempo total cronometrado',
+          sub: 'Tiempo total cronometrado del turno (incluye el tiempo AFK)',
           accent: 'bg-blue-500'
+        },
+        {
+          l: 'Tiempo AFK',
+          v: formatTime(idleTime),
+          c: idleTime > 0 ? 'text-orange-500' : 'text-muted-foreground',
+          i: Moon,
+          sub: 'Tiempo sin actividad de mouse o teclado detectado durante el turno. Tu supervisor lo ve; mantené actividad para no acumular AFK.',
+          accent: 'bg-orange-500'
         },
         {
           l: 'Deuda Diaria',

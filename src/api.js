@@ -1,6 +1,5 @@
 import { useAuthStore } from './stores/auth'
-
-const apiUrl = import.meta.env.VITE_API_BASE_URL || 'https://crm-app.up.railway.app/api/v1'
+import { API_BASE_URL as apiUrl } from './config.js'
 
 // Cache for preventing duplicate requests
 const requestCache = new Map()
@@ -40,13 +39,16 @@ async function request(path, options = {}) {
   })
 
   if (response.status === 401) {
+    // Sesión expirada: deslogueamos y lanzamos un error estructurado.
+    // Antes hacíamos `return` (undefined) y los callers que destructuran
+    // `{ data }` reventaban con un TypeError críptico.
     auth.logout()
-    return
+    throw { status: 401, code: 'AUTH', message: 'Tu sesión expiró. Volvé a iniciar sesión.' }
   }
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({}))
-    throw error
+    throw { status: response.status, ...error }
   }
 
   const result = { data: await response.json().catch(() => ({})) }

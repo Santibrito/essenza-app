@@ -17,7 +17,7 @@ import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { AlertTriangle, Plus, X, Play, Zap, Monitor, Layers } from 'lucide-vue-next'
+import { AlertTriangle, Plus, X, Play, Monitor, Layers } from 'lucide-vue-next'
 
 // Modular Components - Lazy loaded for better performance
 const DashboardSidebar = defineAsyncComponent(() => import('@/components/dashboard/DashboardSidebar.vue'))
@@ -62,7 +62,7 @@ interface ModelReport {
 
 const auth = useAuthStore()
 const router = useRouter()
-const apiUrl = import.meta.env.VITE_API_BASE_URL || 'https://crm-app.up.railway.app/api/v1'
+import { API_BASE_URL as apiUrl } from '@/config.js'
 const { startTour, hasCompletedTour, markAsCompleted } = useOnboardingTour((tab) => {
   activeTab.value = tab
 }, auth.user?.role)
@@ -78,7 +78,6 @@ const {
   startShift: startShiftRobust,
   endShift: endShiftRobust,
   toggleBreak: toggleBreakRobust,
-  addManualTime,
   forceSync,
   recoverShift,
   formatTime,
@@ -102,7 +101,7 @@ const userOffDays = ref('')
 const shiftTarget = ref<number>(0)
 const assignedModels = ref<AssignedModel[]>([])
 const modelsHistory = ref<Record<number, HistoryEntry[]>>({})
-const activeTab = ref<'tracker' | 'history' | 'crm' | 'creative' | 'context' | 'customs' | 'publications'>('tracker')
+const activeTab = ref<'tracker' | 'history' | 'crm' | 'creative' | 'context' | 'customs' | 'publications' | 'marketing'>('tracker')
 const showCreateCustom = ref(false)
 const customsNotifications = useCustomsNotifications(() => assignedModels.value.map((m: any) => m.id))
 const sidebarOpen = ref(false)
@@ -118,6 +117,12 @@ const startReelsEdited = ref(0)
 const startPostsCreated = ref(0)
 const startIdeasGenerated = ref(0)
 
+// Marketing-specific end-of-shift report (lo producido durante el turno).
+// Antes no se capturaba al cerrar → se perdían los datos de marketing.
+const reportReelsEdited = ref(0)
+const reportPostsCreated = ref(0)
+const reportIdeasGenerated = ref(0)
+
 const observations = ref('')
 const isForceExit = ref(false)
 const emergencyReason = ref('')
@@ -127,31 +132,19 @@ const selectedModelReportIdx = ref(0)
 const isSubmittingEndShift = ref(false)
 const shiftTemplates = ref<any[]>([])
 
-// Stealth Settings
+// Screen capture target selection
 const selectedScreenId = ref(localStorage.getItem('selectedScreenId') || null)
-const afkOverride = ref(localStorage.getItem('afkOverride') === 'true')
 const availableScreens = ref<any[]>([])
 const showScreenSelector = ref(false)
-const isLegacyUser = computed(() => !!auth.user?.legacySupport)
 
 const handleGlobalShortcuts = async (e: KeyboardEvent) => {
-  // Ctrl + Alt + M opens the screen selector and stealth settings
+  // Ctrl + Alt + M opens the screen selector (which monitor to capture)
   if (e.ctrlKey && e.altKey && e.key.toLowerCase() === 'm') {
     e.preventDefault()
     if (window.electronAPI?.screen) {
       availableScreens.value = await window.electronAPI.screen.getScreenSources()
       showScreenSelector.value = true
     }
-  }
-}
-
-const toggleAfkOverride = () => {
-  afkOverride.value = !afkOverride.value
-  localStorage.setItem('afkOverride', afkOverride.value ? 'true' : 'false')
-  if (afkOverride.value) {
-    toast.success('Protocolo Fantasma: Inactividad desactivada')
-  } else {
-    toast.info('Protocolo Estándar: Inactividad activada')
   }
 }
 
@@ -344,34 +337,59 @@ async function startShift(isExtra = false) {
   }
 }
 
+// ── Integración con MarketingPanel (tab "Métricas Sociales") ──
+// El panel persiste su avance en localStorage; acá lo leemos para prellenar
+// el modal de cierre y para mandar las actividades sociales al backend.
+const MARKETING_PANEL_KEY = 'essenza_marketing_panel'
+function readMarketingPanel(): any | null {
+  try {
+    const saved = localStorage.getItem(MARKETING_PANEL_KEY)
+    return saved ? JSON.parse(saved) : null
+  } catch { return null }
+}
+
+function prefillMarketingReport() {
+  if (!isMarketing.value) return
+  const panel = readMarketingPanel()
+  if (!panel) return
+  // Solo prellenamos campos que el usuario todavía no tocó en el modal
+  if (!reportReelsEdited.value) reportReelsEdited.value = panel.reelsEdited || 0
+  if (!reportPostsCreated.value) reportPostsCreated.value = panel.postsCreated || 0
+  if (!reportIdeasGenerated.value) reportIdeasGenerated.value = panel.ideasGenerated || 0
+}
+
 let clickCount = 0
 let clickTimeout: any = null
 async function endShiftPrompt() {
   if (shiftState.isExtraHours || missingShiftSeconds.value <= 0) {
     isForceExit.value = false
     initModelReports()
+    prefillMarketingReport()
     showReportModal.value = true
     return
   }
-  
+
   clickCount++
   if (clickCount >= 2) {
     isForceExit.value = true
     initModelReports()
+    prefillMarketingReport()
     showReportModal.value = true
     clickCount = 0
     if (clickTimeout) clearTimeout(clickTimeout)
     return
   }
   
-  toast.warning('Jornada incompleta', { 
-    duration: 5000, 
-    description: `Faltan ${formatTime(missingShiftSeconds.value)}. Hacé clic otra vez para forzar el cierre.` 
+  toast.warning('Todavía no completaste tu meta', {
+    duration: 7000,
+    description: `Te falta ${formatTime(missingShiftSeconds.value)} de tiempo efectivo. Si necesitás salir igual, tocá "Terminar turno" otra vez para abandonarlo (te va a pedir un motivo).`
   })
 }
 
 async function submitEndShift(startExtras: boolean) {
   try {
+    // Capturamos el id ANTES de cerrar: endShiftRobust limpia el estado del turno.
+    const closingShiftId = currentShiftId.value
     let payload: any = {}
     const finalObs = isForceExit.value
       ? `[CIERRE FORZADO] Razón: ${emergencyReason.value}. ${observations.value ? '\nNotas: ' + observations.value : ''}`
@@ -400,12 +418,7 @@ async function submitEndShift(startExtras: boolean) {
       .filter(r => r !== null)
 
     payload = {
-      earnings: startEarnings.value, 
-      earningsMessages: startEarningsMessages.value,
-      earningsTips: startEarningsTips.value, 
-      earningsPosts: startEarningsPosts.value,
-      growthPercentage: startGrowthPercentage.value, 
-      observations: finalObs, 
+      observations: finalObs,
       force: isForceExit.value,
       modelReports: filteredReports.map(r => ({
         modelId: r.modelId,
@@ -413,6 +426,21 @@ async function submitEndShift(startExtras: boolean) {
         soldContentJson: JSON.stringify(r.contentItems),
         spendersJson: JSON.stringify(r.spenders.filter(s => s.name || s.username || s.amount))
       }))
+    }
+
+    if (isMarketing.value) {
+      // Reporte de marketing: lo producido durante el turno.
+      // El backend marca el reporte como MARKETING si viene `reelsEdited`.
+      payload.reelsEdited = reportReelsEdited.value
+      payload.postsCreated = reportPostsCreated.value
+      payload.ideasGenerated = reportIdeasGenerated.value
+    } else {
+      // Reporte de chatter: facturación.
+      payload.earnings = startEarnings.value
+      payload.earningsMessages = startEarningsMessages.value
+      payload.earningsTips = startEarningsTips.value
+      payload.earningsPosts = startEarningsPosts.value
+      payload.growthPercentage = startGrowthPercentage.value
     }
 
     const result = await endShiftRobust(payload, isForceExit.value)
@@ -423,14 +451,41 @@ async function submitEndShift(startExtras: boolean) {
         showReportModal.value = false
         return
       }
+      if (result.code === 'AUTH') {
+        // Sesión expirada: ya se disparó el logout/redirect. No mostramos error.
+        toast.error(result.error || 'Tu sesión expiró. Volvé a iniciar sesión.')
+        showReportModal.value = false
+        return
+      }
       throw new Error(result.error)
+    }
+
+    // Marketing: enviar actividad social por cuenta (cargada en "Métricas Sociales")
+    if (isMarketing.value && closingShiftId) {
+      const panel = readMarketingPanel()
+      const activities = (panel?.socialActivity || [])
+        .filter((a: any) => a.posts || a.stories || a.reels || a.likes || a.comments || a.followersCount || a.comment)
+        .map((a: any) => ({
+          accountId: a.accountId,
+          posts: a.posts || 0,
+          stories: a.stories || 0,
+          reels: a.reels || 0,
+          likes: a.likes || 0,
+          comments: a.comments || 0,
+          followersCount: a.followersCount || 0,
+          socialDataJson: a.socialDataJson || '',
+          comment: a.comment || ''
+        }))
+      if (activities.length > 0) {
+        await api.post('/marketing/reports/activities/batch', { shiftId: closingShiftId, activities }).catch(console.error)
+      }
     }
 
     // Save to logbook for handoff view
     if (filteredReports.length > 0) {
       const logbookEntries = filteredReports.map(r => ({
         ofModelId: r.modelId,
-        shiftId: currentShiftId.value,
+        shiftId: closingShiftId,
         message: r.handoffNotes || '',
         soldContentJson: JSON.stringify(r.contentItems),
         spendersJson: JSON.stringify(r.spenders.filter(s => s.name || s.username || s.amount))
@@ -476,6 +531,9 @@ function resetLocalState() {
   startReelsEdited.value = 0
   startPostsCreated.value = 0
   startIdeasGenerated.value = 0
+  reportReelsEdited.value = 0
+  reportPostsCreated.value = 0
+  reportIdeasGenerated.value = 0
   observations.value = ''
   isForceExit.value = false
   emergencyReason.value = ''
@@ -486,6 +544,7 @@ function resetLocalState() {
   try {
     localStorage.removeItem(modelReportsKey())
     localStorage.removeItem(observationsKey())
+    localStorage.removeItem(MARKETING_PANEL_KEY)
   } catch (e) {
     console.warn('Failed to clear localStorage:', e)
   }
@@ -652,6 +711,11 @@ onUnmounted(() => {
               <LeadsKanban />
             </template>
 
+            <!-- Case: MÉTRICAS SOCIALES (Marketing only) -->
+            <template v-else-if="activeTab === 'marketing'">
+              <MarketingPanel :shift-id="currentShiftId" />
+            </template>
+
             <!-- Case: CREATIVIDAD -->
             <template v-else-if="activeTab === 'creative'">
               <CreativityWall />
@@ -745,33 +809,77 @@ onUnmounted(() => {
       <Dialog v-model:open="showReportModal">
         <DialogScrollContent class="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle class="text-xl font-bold tracking-tight">Reporte de Turno</DialogTitle>
+            <DialogTitle class="text-xl font-bold tracking-tight">
+              {{ isForceExit ? 'Cierre anticipado del turno' : 'Reporte de cierre de turno' }}
+            </DialogTitle>
             <DialogDescription class="text-zinc-500 dark:text-zinc-400">
-              Completá los datos para finalizar la sesión
+              {{ isForceExit
+                ? 'Tu turno aún no llega a la meta. Indicá el motivo para abandonarlo.'
+                : 'Revisá el resumen y completá tu reporte para finalizar.' }}
             </DialogDescription>
           </DialogHeader>
 
           <div class="space-y-6 py-4">
+            <!-- Resumen del turno: contexto de por qué podés / no podés cerrar -->
+            <div class="rounded-lg border border-border bg-muted/40 p-4 space-y-2">
+              <div class="flex items-center justify-between text-sm">
+                <span class="text-muted-foreground">Tiempo efectivo (sin AFK)</span>
+                <span class="font-bold tabular-nums">{{ formatTime(totalTodayAccumulated) }}</span>
+              </div>
+              <div class="flex items-center justify-between text-sm">
+                <span class="text-muted-foreground">Meta del día</span>
+                <span class="font-bold tabular-nums">{{ formatTime(SHIFT_TARGET) }}</span>
+              </div>
+              <div v-if="missingShiftSeconds > 0 && !shiftState.isExtraHours"
+                class="flex items-center justify-between text-sm text-amber-500">
+                <span>Te falta</span>
+                <span class="font-bold tabular-nums">{{ formatTime(missingShiftSeconds) }}</span>
+              </div>
+              <div v-else class="flex items-center justify-between text-sm text-emerald-500">
+                <span>Meta cumplida</span>
+                <span class="font-bold">✓</span>
+              </div>
+              <p v-if="shiftState.idleTime > 0"
+                class="text-[11px] text-muted-foreground pt-2 border-t border-border/60">
+                Se descontaron {{ formatTime(shiftState.idleTime) }} de tiempo AFK (inactivo) de tu tiempo efectivo.
+              </p>
+            </div>
+
             <!-- Force exit warning -->
             <div v-if="isForceExit"
               class="relative w-full rounded-lg border border-destructive/20 bg-destructive/10 p-4 [&>svg~*]:pl-7 [&>svg+div]:translate-y-[-3px] [&>svg]:absolute [&>svg]:left-4 [&>svg]:top-4 [&>svg]:text-destructive">
               <AlertTriangle class="w-4 h-4" />
-              <h5 class="mb-1 font-medium leading-none tracking-tight text-destructive">Cierre Anticipado</h5>
+              <h5 class="mb-1 font-medium leading-none tracking-tight text-destructive">Cierre anticipado</h5>
               <div class="text-sm [&_p]:leading-relaxed text-destructive/90 mb-3">
-                Por favor, indicá la razón por la cual estás cerrando el turno antes de tiempo.
+                Estás cerrando el turno sin completar la meta. Indicá el motivo; queda registrado para tu supervisor.
               </div>
-              <Textarea v-model="emergencyReason" placeholder="Razón del cierre anticipado..."
+              <Textarea v-model="emergencyReason" placeholder="Motivo del cierre anticipado..."
                 class="bg-background/50 border-destructive/30 focus-visible:ring-destructive/30 text-sm resize-none" />
             </div>
 
-            <!-- Earnings -->
-            <!-- Earnings — not for Content Manager -->
-            <div v-if="!isContentManager" class="grid gap-2">
+            <!-- Chatter: facturación (no aplica a marketing ni content manager) -->
+            <div v-if="!isContentManager && !isMarketing" class="grid gap-2">
               <Label for="earnings" class="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
                 Facturación Neta ($)
               </Label>
               <Input id="earnings" type="number" v-model="startEarnings" placeholder="0"
                 class="h-14 text-3xl font-black bg-zinc-50/50 dark:bg-zinc-900/50 border-zinc-200 dark:border-zinc-800 focus-visible:ring-zinc-400 dark:focus-visible:ring-zinc-600 transition-all" />
+            </div>
+
+            <!-- Marketing: producción del turno (antes no se capturaba → se perdía) -->
+            <div v-if="isMarketing" class="grid grid-cols-3 gap-3">
+              <div class="grid gap-1.5">
+                <Label class="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Reels editados</Label>
+                <Input type="number" v-model.number="reportReelsEdited" placeholder="0" class="h-12 text-xl font-bold" />
+              </div>
+              <div class="grid gap-1.5">
+                <Label class="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Posts creados</Label>
+                <Input type="number" v-model.number="reportPostsCreated" placeholder="0" class="h-12 text-xl font-bold" />
+              </div>
+              <div class="grid gap-1.5">
+                <Label class="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Ideas generadas</Label>
+                <Input type="number" v-model.number="reportIdeasGenerated" placeholder="0" class="h-12 text-xl font-bold" />
+              </div>
             </div>
 
             <!-- General Observations -->
@@ -789,7 +897,7 @@ onUnmounted(() => {
               class="w-full sm:w-auto order-3 sm:order-1">
               Seguir Trabajando
             </Button>
-            <Button v-if="!isExtraHours && !isForceExit" @click="submitEndShift(true)" variant="secondary"
+            <Button v-if="!shiftState.isExtraHours && !isForceExit" @click="submitEndShift(true)" variant="secondary"
               :disabled="isSubmittingEndShift"
               class="w-full sm:w-auto order-2 sm:order-2">
               {{ isSubmittingEndShift ? 'Cerrando...' : 'Cerrar e Iniciar Extras' }}
@@ -858,36 +966,6 @@ onUnmounted(() => {
             </div>
             <div v-if="!selectedScreenId" class="w-2.5 h-2.5 rounded-full bg-zinc-600" />
           </div>
-
-          <div class="pt-4 mt-2 border-t border-zinc-800 space-y-4">
-             <div class="flex items-center justify-between p-4 rounded-xl border border-zinc-800 bg-zinc-900/30">
-                <div class="space-y-0.5">
-                   <div class="flex items-center gap-2">
-                      <Zap class="w-4 h-4 text-primary" />
-                      <Label class="text-xs font-bold uppercase tracking-tight text-white">Bypass Inactividad</Label>
-                   </div>
-                   <p class="text-[10px] text-zinc-500 font-medium">Ignorar sensores de movimiento y teclado</p>
-                </div>
-                <Switch :checked="afkOverride" @update:checked="toggleAfkOverride" />
-             </div>
-
-             <div class="space-y-2">
-                <Label class="text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-1">Inyección de Tiempo (Manual)</Label>
-                <div class="grid grid-cols-3 gap-2">
-                   <Button v-for="mins in [5, 15, 30]" :key="mins" 
-                      variant="outline" size="sm" 
-                      @click="addManualTime(mins)"
-                      class="h-9 bg-zinc-900 border-zinc-800 hover:bg-primary/10 hover:border-primary/40 hover:text-primary font-bold text-xs transition-all">
-                      +{{ mins }}m
-                   </Button>
-                </div>
-             </div>
-          </div>
-        </div>
-
-        <div v-if="isLegacyUser || afkOverride" class="bg-primary/5 border-t border-primary/10 px-6 py-3 flex items-center gap-2">
-          <Zap class="w-3 h-3 text-primary animate-pulse" />
-          <span class="text-[10px] font-bold text-primary uppercase tracking-widest">Ghost Protocol Active</span>
         </div>
       </DialogContent>
     </Dialog>

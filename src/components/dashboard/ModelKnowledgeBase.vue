@@ -14,7 +14,6 @@ import { Separator } from '@/components/ui/separator'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { useAuthStore } from '@/stores/auth'
-import ModelLinktreeTab from '@/components/models/ModelLinktreeTab.vue'
 
 const props = defineProps<{
   assignedModels: any[]
@@ -32,7 +31,7 @@ const logbookEntries = ref<any[]>([])
 const loadingAnalytics = ref(false)
 const userNamesCache = ref<Record<string, string>>({})
 
-const apiUrl = import.meta.env.VITE_API_BASE_URL || 'https://crm-app.up.railway.app/api/v1'
+import { API_BASE_URL as apiUrl } from '@/config.js'
 
 // Función para obtener el nombre real de un usuario por username
 async function fetchUserRealName(username: string): Promise<string> {
@@ -300,12 +299,8 @@ function getAvatarColor(name: string) {
                   class="px-8 rounded-lg text-xs font-bold uppercase tracking-wider data-[state=active]:bg-background data-[state=active]:shadow-sm">
                   Compradores</TabsTrigger>
                 <TabsTrigger value="history"
-                  class="px-8 rounded-lg text-xs font-bold uppercase tracking-wider data-[state=active]:bg-background data-[state=active]:shadow-sm flex items-center gap-2">
+                  class="px-4 rounded-lg text-xs font-bold uppercase tracking-wider data-[state=active]:bg-background data-[state=active]:shadow-sm flex items-center gap-1.5 whitespace-nowrap">
                   <MessageSquare class="w-3.5 h-3.5" /> Bitácora
-                </TabsTrigger>
-                <TabsTrigger value="linktree"
-                  class="px-8 rounded-lg text-xs font-bold uppercase tracking-wider data-[state=active]:bg-background data-[state=active]:shadow-sm flex items-center gap-2">
-                  <Share2 class="w-3.5 h-3.5" /> Linktree
                 </TabsTrigger>
               </TabsList>
 
@@ -631,11 +626,6 @@ function getAvatarColor(name: string) {
                     <p class="text-xs text-muted-foreground">Las actualizaciones de tus compañeros aparecerán aquí.</p>
                   </div>
                 </div>
-              </TabsContent>
-
-              <!-- LINKTREE -->
-              <TabsContent value="linktree" class="h-full">
-                <ModelLinktreeTab :model-id="selectedModel.id" />
               </TabsContent>
             </Tabs>
           </div>
