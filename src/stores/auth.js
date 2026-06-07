@@ -198,6 +198,11 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('essenza_observations')
     localStorage.removeItem('selectedScreenId')
     localStorage.removeItem('afkOverride')
+    // Estado del turno: si queda, el próximo usuario en esta PC vería/heredaría
+    // el turno del anterior (el turno real se recupera del server al loguear)
+    localStorage.removeItem('shiftManager_state')
+    localStorage.removeItem('shiftManager_lastUpdate')
+    localStorage.removeItem('essenza_marketing_panel')
     sessionStorage.clear()
     
     // Clear API cache

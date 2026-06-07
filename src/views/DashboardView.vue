@@ -387,6 +387,10 @@ async function endShiftPrompt() {
 }
 
 async function submitEndShift(startExtras: boolean) {
+  // Guard anti doble-click: el ref existía pero nunca se seteaba, así que los
+  // botones "Terminar Turno" jamás se deshabilitaban durante el request.
+  if (isSubmittingEndShift.value) return
+  isSubmittingEndShift.value = true
   try {
     // Capturamos el id ANTES de cerrar: endShiftRobust limpia el estado del turno.
     const closingShiftId = currentShiftId.value
@@ -506,9 +510,11 @@ async function submitEndShift(startExtras: boolean) {
       toast.success('Turno finalizado correctamente.')
     }
     
-  } catch (e: any) { 
+  } catch (e: any) {
     console.error('Error ending shift:', e)
-    errorDialog.value = { show: true, message: e?.message || String(e) } 
+    errorDialog.value = { show: true, message: e?.message || String(e) }
+  } finally {
+    isSubmittingEndShift.value = false
   }
 }
 
