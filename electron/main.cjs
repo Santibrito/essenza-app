@@ -73,7 +73,9 @@ autoUpdater.on('update-downloaded', (info) => {
   mainWindow?.webContents.send('updater:status', {
     type: 'ready',
     info,
-    message: `Versión ${info.version} lista. Se instalará al cerrar la app.`
+    message: isShiftActive
+      ? `Versión ${info.version} lista. Se instalará automáticamente al cerrar tu turno.`
+      : `Versión ${info.version} lista. Instalando en unos segundos...`
   })
   
   // Auto-instala a los 5s SOLO si no hay turno activo.
@@ -217,6 +219,9 @@ function createWindow() {
     enableRemoteModule: false,
     sandbox: false,
     experimentalFeatures: false,
+    // DevTools solo en desarrollo: en prod permitía editar localStorage
+    // (shiftManager_state) y llamar window.electronAPI a mano.
+    devTools: isDev,
   }
 
   // Apply low-RAM optimizations if needed
@@ -550,11 +555,9 @@ app.whenReady().then(() => {
   const cleanupInterval = optimizationConfig.isLowRAM ? 3 * 60 * 1000 : 10 * 60 * 1000
   setInterval(() => {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      // Force garbage collection
+      // Nota: window.gc() era un no-op (requiere --js-flags=--expose-gc);
+      // se quitó. La limpieza real es la de caches + clearCache de abajo.
       mainWindow.webContents.executeJavaScript(`
-        if (window.gc) {
-          window.gc();
-        }
         // Clear old fetch cache
         if ('caches' in window) {
           caches.keys().then(names => {

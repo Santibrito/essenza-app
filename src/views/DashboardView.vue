@@ -26,7 +26,6 @@ const TrackerCard = defineAsyncComponent(() => import('@/components/dashboard/Tr
 const StatsCards = defineAsyncComponent(() => import('@/components/dashboard/StatsCards.vue'))
 const NotesCard = defineAsyncComponent(() => import('@/components/dashboard/NotesCard.vue'))
 const AnnouncementsBanner = defineAsyncComponent(() => import('@/components/dashboard/AnnouncementsBanner.vue'))
-const ModelHandoffCard = defineAsyncComponent(() => import('@/components/dashboard/ModelHandoffCard.vue'))
 const MarketingPanel = defineAsyncComponent(() => import('@/components/dashboard/MarketingPanel.vue'))
 const CreativityWall = defineAsyncComponent(() => import('@/components/dashboard/CreativityWall.vue'))
 const LeadsKanban = defineAsyncComponent(() => import('@/components/dashboard/LeadsKanban.vue'))
@@ -36,7 +35,6 @@ const ModelKnowledgeBase = defineAsyncComponent(() => import('@/components/dashb
 const CustomsList = defineAsyncComponent(() => import('@/components/customs/CustomsList.vue'))
 const CreateCustomModal = defineAsyncComponent(() => import('@/components/customs/CreateCustomModal.vue'))
 const ContentManagerKanban = defineAsyncComponent(() => import('@/components/customs/ContentManagerKanban.vue'))
-const ShiftModelReport = defineAsyncComponent(() => import('@/components/dashboard/ShiftModelReport.vue'))
 const PublicationsCalendar = defineAsyncComponent(() => import('@/components/dashboard/PublicationsCalendar.vue'))
 import { useCustomsNotifications } from '@/lib/useCustomsNotifications'
 import { postWithOutbox, flushOutbox } from '@/lib/outbox'

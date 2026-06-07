@@ -222,7 +222,8 @@ const assignedEnd = computed(() => {
             <component :is="isPaused ? Play : Coffee" class="w-4 h-4 mr-2" />
             {{ isPaused ? 'Retomar' : 'Break' }}
           </Button>
-          <Button variant="destructive" size="sm" class="h-9 px-4  text-white" @click="emit('endShift')">
+          <Button variant="destructive" size="sm" class="h-9 px-4  text-white" @click="emit('endShift')"
+            title="Si todavía no llegaste a la meta, tocá dos veces para abandonar el turno (te pide un motivo)">
             Terminar
           </Button>
         </div>
