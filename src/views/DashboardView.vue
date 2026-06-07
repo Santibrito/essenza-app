@@ -39,6 +39,7 @@ const ContentManagerKanban = defineAsyncComponent(() => import('@/components/cus
 const ShiftModelReport = defineAsyncComponent(() => import('@/components/dashboard/ShiftModelReport.vue'))
 const PublicationsCalendar = defineAsyncComponent(() => import('@/components/dashboard/PublicationsCalendar.vue'))
 import { useCustomsNotifications } from '@/lib/useCustomsNotifications'
+import { postWithOutbox, flushOutbox } from '@/lib/outbox'
 
 // Types
 interface AssignedModel { id: number; name: string; alias?: string }
@@ -461,6 +462,15 @@ async function submitEndShift(startExtras: boolean) {
         showReportModal.value = false
         return
       }
+      if (result.code === 'NETWORK') {
+        // Server caído: el turno sigue activo. Dejamos el modal ABIERTO
+        // (con lo que ya escribió) para que pueda reintentar.
+        toast.error('No se pudo cerrar el turno', {
+          duration: 10000,
+          description: result.error
+        })
+        return
+      }
       throw new Error(result.error)
     }
 
@@ -481,7 +491,12 @@ async function submitEndShift(startExtras: boolean) {
           comment: a.comment || ''
         }))
       if (activities.length > 0) {
-        await api.post('/marketing/reports/activities/batch', { shiftId: closingShiftId, activities }).catch(console.error)
+        const sent = await postWithOutbox('/marketing/reports/activities/batch', { shiftId: closingShiftId, activities })
+        if (!sent) {
+          toast.info('Actividades de marketing guardadas localmente', {
+            description: 'Se reenviarán automáticamente cuando vuelva la conexión.'
+          })
+        }
       }
     }
 
@@ -495,7 +510,7 @@ async function submitEndShift(startExtras: boolean) {
         spendersJson: JSON.stringify(r.spenders.filter(s => s.name || s.username || s.amount))
       }))
       
-      await api.post('/admin/models/logbook/batch', logbookEntries).catch(console.error)
+      await postWithOutbox('/admin/models/logbook/batch', logbookEntries)
     }
 
     // Reset local state
@@ -581,6 +596,9 @@ async function loadHandoff() {
   } catch { }
 }
 
+// Reintento de envíos pendientes (marketing/logbook que fallaron por red)
+let outboxInterval: any = null
+
 onMounted(async () => {
   // Token is already validated by the router guard (validateSession).
   // If we got here, the token is valid or the server is unreachable (offline tolerance).
@@ -623,10 +641,15 @@ onMounted(async () => {
   } catch { }
 
   window.addEventListener('keydown', handleGlobalShortcuts)
+
+  // Vaciar la cola de envíos pendientes ahora y cada 60s
+  flushOutbox()
+  outboxInterval = setInterval(flushOutbox, 60000)
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleGlobalShortcuts)
+  if (outboxInterval) clearInterval(outboxInterval)
 })
 </script>
 

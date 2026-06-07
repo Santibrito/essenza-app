@@ -294,6 +294,17 @@ class ShiftManager {
       
     } catch (e) {
       console.error('Failed to end shift:', e)
+      // Fallo de red (server caído / sin internet tras los reintentos):
+      // el turno SIGUE activo local y en el server; avisamos claro para que
+      // el usuario reintente en vez de quedarse con un "Failed to fetch".
+      const isNetwork = e instanceof TypeError || /fetch|network/i.test(e?.message || '')
+      if (isNetwork) {
+        return {
+          success: false,
+          code: 'NETWORK',
+          error: 'No se pudo contactar al servidor. Tu turno sigue activo y el tiempo se sigue contando. Reintentá en unos minutos.'
+        }
+      }
       this.notify('error', 'Error al finalizar turno', e.message)
       return { success: false, error: e.message }
     } finally {
