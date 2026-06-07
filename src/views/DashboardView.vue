@@ -422,6 +422,27 @@ async function submitEndShift(startExtras: boolean) {
       })
       .filter(r => r !== null)
 
+    // Actividad social por cuenta (cargada en "Métricas Sociales").
+    // Se calcula acá porque va en DOS lados: el JSON del reporte (lo que ve
+    // el admin en ShiftDetails) y el batch a /marketing/reports.
+    const marketingActivities = isMarketing.value
+      ? (readMarketingPanel()?.socialActivity || [])
+          .filter((a: any) => a.posts || a.stories || a.reels || a.likes || a.comments || a.followersCount || a.comment)
+          .map((a: any) => ({
+            accountId: a.accountId,
+            handle: a.handle,
+            platform: a.platform,
+            posts: a.posts || 0,
+            stories: a.stories || 0,
+            reels: a.reels || 0,
+            likes: a.likes || 0,
+            comments: a.comments || 0,
+            followersCount: a.followersCount || 0,
+            socialDataJson: a.socialDataJson || '',
+            comment: a.comment || ''
+          }))
+      : []
+
     payload = {
       observations: finalObs,
       force: isForceExit.value,
@@ -433,12 +454,21 @@ async function submitEndShift(startExtras: boolean) {
       }))
     }
 
+    // Motivo del cierre forzado como campo propio (el backend lo guarda en
+    // shift.closeReason para que el admin lo vea como badge, no solo en notas)
+    if (isForceExit.value) {
+      payload.closeReason = emergencyReason.value || ''
+    }
+
     if (isMarketing.value) {
       // Reporte de marketing: lo producido durante el turno.
       // El backend marca el reporte como MARKETING si viene `reelsEdited`.
       payload.reelsEdited = reportReelsEdited.value
       payload.postsCreated = reportPostsCreated.value
       payload.ideasGenerated = reportIdeasGenerated.value
+      if (marketingActivities.length > 0) {
+        payload.socialActivityJson = JSON.stringify(marketingActivities)
+      }
     } else {
       // Reporte de chatter: facturación.
       payload.earnings = startEarnings.value
@@ -474,29 +504,13 @@ async function submitEndShift(startExtras: boolean) {
       throw new Error(result.error)
     }
 
-    // Marketing: enviar actividad social por cuenta (cargada en "Métricas Sociales")
-    if (isMarketing.value && closingShiftId) {
-      const panel = readMarketingPanel()
-      const activities = (panel?.socialActivity || [])
-        .filter((a: any) => a.posts || a.stories || a.reels || a.likes || a.comments || a.followersCount || a.comment)
-        .map((a: any) => ({
-          accountId: a.accountId,
-          posts: a.posts || 0,
-          stories: a.stories || 0,
-          reels: a.reels || 0,
-          likes: a.likes || 0,
-          comments: a.comments || 0,
-          followersCount: a.followersCount || 0,
-          socialDataJson: a.socialDataJson || '',
-          comment: a.comment || ''
-        }))
-      if (activities.length > 0) {
-        const sent = await postWithOutbox('/marketing/reports/activities/batch', { shiftId: closingShiftId, activities })
-        if (!sent) {
-          toast.info('Actividades de marketing guardadas localmente', {
-            description: 'Se reenviarán automáticamente cuando vuelva la conexión.'
-          })
-        }
+    // Marketing: enviar actividad social por cuenta al registro estructurado
+    if (isMarketing.value && closingShiftId && marketingActivities.length > 0) {
+      const sent = await postWithOutbox('/marketing/reports/activities/batch', { shiftId: closingShiftId, activities: marketingActivities })
+      if (!sent) {
+        toast.info('Actividades de marketing guardadas localmente', {
+          description: 'Se reenviarán automáticamente cuando vuelva la conexión.'
+        })
       }
     }
 
