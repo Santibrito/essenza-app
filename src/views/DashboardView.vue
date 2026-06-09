@@ -6,6 +6,8 @@ import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { useOnboardingTour } from '@/composables/useOnboardingTour'
 import { useShiftManager } from '@/composables/useShiftManager'
+import { useReportDrafts } from '@/composables/useReportDrafts'
+import { useUserSchedule } from '@/composables/useUserSchedule'
 
 // UI Primitives
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -36,6 +38,7 @@ const CustomsList = defineAsyncComponent(() => import('@/components/customs/Cust
 const CreateCustomModal = defineAsyncComponent(() => import('@/components/customs/CreateCustomModal.vue'))
 const ContentManagerKanban = defineAsyncComponent(() => import('@/components/customs/ContentManagerKanban.vue'))
 const PublicationsCalendar = defineAsyncComponent(() => import('@/components/dashboard/PublicationsCalendar.vue'))
+const PaymentReceiptsSection = defineAsyncComponent(() => import('@/components/dashboard/PaymentReceiptsSection.vue'))
 import { useCustomsNotifications } from '@/lib/useCustomsNotifications'
 import { postWithOutbox, flushOutbox } from '@/lib/outbox'
 
@@ -61,7 +64,6 @@ interface ModelReport {
 
 const auth = useAuthStore()
 const router = useRouter()
-import { API_BASE_URL as apiUrl } from '@/config.js'
 const { startTour, hasCompletedTour, markAsCompleted } = useOnboardingTour((tab) => {
   activeTab.value = tab
 }, auth.user?.role)
@@ -95,12 +97,14 @@ const showStartModal = ref(false)
 const showReportModal = ref(false)
 const errorDialog = ref<{ show: boolean; message: string }>({ show: false, message: "" })
 
-const userSchedule = ref<any>(null)
+const {
+  userSchedule, assignedModels, offDaysArray, isWithinSchedule,
+  fetchUserSchedule, fetchUserAllSchedules, fetchTemplates, loadHandoff
+} = useUserSchedule()
 const userOffDays = ref('')
 const shiftTarget = ref<number>(0)
-const assignedModels = ref<AssignedModel[]>([])
 const modelsHistory = ref<Record<number, HistoryEntry[]>>({})
-const activeTab = ref<'tracker' | 'history' | 'crm' | 'creative' | 'context' | 'customs' | 'publications' | 'marketing'>('tracker')
+const activeTab = ref<'tracker' | 'history' | 'crm' | 'creative' | 'context' | 'customs' | 'publications' | 'marketing' | 'receipts'>('tracker')
 const showCreateCustom = ref(false)
 const customsNotifications = useCustomsNotifications(() => assignedModels.value.map((m: any) => m.id))
 const sidebarOpen = ref(false)
@@ -122,14 +126,13 @@ const reportReelsEdited = ref(0)
 const reportPostsCreated = ref(0)
 const reportIdeasGenerated = ref(0)
 
-const observations = ref('')
+const { observations, modelReports, restoreDrafts, clearDrafts } = useReportDrafts()
 const isForceExit = ref(false)
 const emergencyReason = ref('')
 
 const perModelReports = ref<ModelExitReport[]>([])
 const selectedModelReportIdx = ref(0)
 const isSubmittingEndShift = ref(false)
-const shiftTemplates = ref<any[]>([])
 
 // Screen capture target selection
 const selectedScreenId = ref(localStorage.getItem('selectedScreenId') || null)
@@ -147,12 +150,6 @@ const handleGlobalShortcuts = async (e: KeyboardEvent) => {
   }
 }
 
-// Auth headers helper for manual fetch calls (schedule, handoff)
-const authHeaders = () => ({
-  'Authorization': `Bearer ${auth.user?.token}`,
-  'Content-Type': 'application/json'
-})
-
 // Computed bridge to ShiftManager UI state
 const statusColor = computed(() => {
   if (!isWorking.value) return 'zinc'
@@ -161,36 +158,7 @@ const statusColor = computed(() => {
 })
 const isServerDown = computed(() => shiftUI.connectionStatus === 'disconnected')
 
-const modelReports = ref<Record<number, ModelReport>>({})
 const dailySummary = ref<any>(null)
-
-// ── persistence ───────────────────────────────────────────────
-import { watch as vWatch } from 'vue'
-const modelReportsKey = () => `essenza_model_reports`
-const observationsKey = () => `essenza_observations`
-
-function restoreModelReports() {
-  try {
-    const saved = localStorage.getItem(modelReportsKey())
-    if (saved) modelReports.value = JSON.parse(saved)
-  } catch { /* ignore malformed data */ }
-}
-
-function restoreObservations() {
-  try {
-    const saved = localStorage.getItem(observationsKey())
-    if (saved) observations.value = saved
-  } catch { }
-}
-
-vWatch(modelReports, (val) => {
-  try { localStorage.setItem(modelReportsKey(), JSON.stringify(val)) } catch { }
-}, { deep: true })
-
-vWatch(observations, (val) => {
-  try { localStorage.setItem(observationsKey(), val) } catch { }
-})
-const userAllSchedules = ref<any[]>([])
 
 // --- Computed (actualizados para usar ShiftManager) ---
 const isMarketing = computed(() => auth.user?.role === 'ROLE_MARKETING')
@@ -221,59 +189,7 @@ const shiftCompliancePercent = computed(() =>
 const hasHoursDebt = computed(() => (dailySummary.value?.todayActiveSeconds || 0) < SHIFT_TARGET.value)
 const debtMinutes = computed(() => Math.max(0, Math.floor((SHIFT_TARGET.value - (dailySummary.value?.todayActiveSeconds || 0)) / 60)))
 
-const dayTranslations: Record<string, string> = {
-  'MONDAY': 'Lun', 'TUESDAY': 'Mar', 'WEDNESDAY': 'Mié', 'THURSDAY': 'Jue',
-  'FRIDAY': 'Vie', 'SATURDAY': 'Sáb', 'SUNDAY': 'Dom'
-}
-const allDays = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']
-
-const offDaysArray = computed(() => {
-  const scheduledDays = userAllSchedules.value.map(s => s.dayOfWeek)
-  if (scheduledDays.length === 0) return [] // Si no hay agenda cargada, no mostramos nada para evitar ruidos
-  return allDays.filter(day => !scheduledDays.includes(day)).map(day => dayTranslations[day])
-})
-
-const isWithinSchedule = computed(() => {
-  if (!userSchedule.value?.template) return true // Si no hay horario cargado, permitimos
-  const { startTime, endTime } = userSchedule.value.template
-  if (!startTime || !endTime) return true
-
-  const now = new Date()
-  const currentTz = userSchedule.value.timezone || auth.user?.timezone || 'America/Argentina/Buenos_Aires'
-
-  // Convert current time to the configured timezone
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: currentTz,
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false
-  })
-  const parts = formatter.formatToParts(now)
-  const hour = parts.find(p => p.type === 'hour')?.value || '00'
-  const minute = parts.find(p => p.type === 'minute')?.value || '00'
-  const currentTimeStr = `${hour}:${minute}`
-
-  return currentTimeStr >= startTime.slice(0, 5) && currentTimeStr <= endTime.slice(0, 5)
-})
-
-// --- Fetch Templates ---
-async function fetchTemplates() {
-  // TODO: Backend endpoint not implemented yet
-  // try {
-  //   const res = await api.get('/shifts/templates/batch')
-  //   shiftTemplates.value = res.data || []
-  // } catch (e) {
-  //   console.error('Error fetching templates:', e)
-  // }
-}
-
-async function fetchUserAllSchedules() {
-  if (!auth.user?.id) return
-  try {
-    const res = await api.get(`/admin/users/schedule/user/${auth.user.id}`)
-    userAllSchedules.value = res.data || []
-  } catch (e) { console.error('Error fetching schedules:', e) }
-}
+// Horarios, modelos asignadas, offDays e isWithinSchedule viven en useUserSchedule().
 
 async function fetchDailySummary() {
   try {
@@ -357,32 +273,14 @@ function prefillMarketingReport() {
   if (!reportIdeasGenerated.value) reportIdeasGenerated.value = panel.ideasGenerated || 0
 }
 
-let clickCount = 0
-let clickTimeout: any = null
 async function endShiftPrompt() {
-  if (shiftState.isExtraHours || missingShiftSeconds.value <= 0) {
-    isForceExit.value = false
-    initModelReports()
-    prefillMarketingReport()
-    showReportModal.value = true
-    return
-  }
-
-  clickCount++
-  if (clickCount >= 2) {
-    isForceExit.value = true
-    initModelReports()
-    prefillMarketingReport()
-    showReportModal.value = true
-    clickCount = 0
-    if (clickTimeout) clearTimeout(clickTimeout)
-    return
-  }
-  
-  toast.warning('Todavía no completaste tu meta', {
-    duration: 7000,
-    description: `Te falta ${formatTime(missingShiftSeconds.value)} de tiempo efectivo. Si necesitás salir igual, tocá "Terminar turno" otra vez para abandonarlo (te va a pedir un motivo).`
-  })
+  // El cierre ya NO se bloquea por meta/AFK ni requiere doble-clic: el chatter termina
+  // normalmente y, si no llegó al objetivo, queda AUDITADO como "tiempo adeudado" en el
+  // panel del administrador (Registro de Turnos).
+  isForceExit.value = false
+  initModelReports()
+  prefillMarketingReport()
+  showReportModal.value = true
 }
 
 async function submitEndShift(startExtras: boolean) {
@@ -567,16 +465,13 @@ function resetLocalState() {
   reportReelsEdited.value = 0
   reportPostsCreated.value = 0
   reportIdeasGenerated.value = 0
-  observations.value = ''
   isForceExit.value = false
   emergencyReason.value = ''
   perModelReports.value = []
-  modelReports.value = {}
-  
-  // Limpiar localStorage de reportes
+
+  // Limpiar borradores de reporte (observaciones + reportes por modelo) + panel marketing
+  clearDrafts()
   try {
-    localStorage.removeItem(modelReportsKey())
-    localStorage.removeItem(observationsKey())
     localStorage.removeItem(MARKETING_PANEL_KEY)
   } catch (e) {
     console.warn('Failed to clear localStorage:', e)
@@ -596,16 +491,6 @@ function initModelReports() {
       spenders: saved.spenders?.length ? [...saved.spenders] : [{ name: '', username: '', amount: '' }],
     }
   })
-}
-
-const handoffData = ref<Record<number, any[]>>({})
-async function loadHandoff() {
-  if (!assignedModels.value.length) return
-  try {
-    const ids = assignedModels.value.map(m => m.id).join(',')
-    const res = await fetch(`${apiUrl}/admin/models/handoff?modelIds=${ids}`, { headers: authHeaders() })
-    if (res.ok) handoffData.value = await res.json()
-  } catch { }
 }
 
 // Reintento de envíos pendientes (marketing/logbook que fallaron por red)
@@ -629,26 +514,20 @@ onMounted(async () => {
   fetchUserAllSchedules()
   fetchDailySummary()
   // Restore in-progress report data from previous session
-  restoreModelReports()
-  restoreObservations()
+  restoreDrafts()
   // Shift recovery is now handled automatically by useShiftManager()
 
   try {
-    const sRes = await fetch(`${apiUrl}/admin/users/schedule/current`, { headers: authHeaders() })
-    if (sRes.ok) {
-      userSchedule.value = await sRes.json()
-      const models = userSchedule.value.assignedModels || []
-      assignedModels.value = models.sort((a: any, b: any) => a.name.localeCompare(b.name))
-      
-      // Only load handoff for Chatters (they see ModelReportsSection)
-      if (!isContentManager.value && !isMarketing.value) {
-        await loadHandoff()
-      }
-      
-      // Start customs notifications polling (only for Chatters and Managers, not Marketing)
-      if (!isMarketing.value) {
-        customsNotifications.start()
-      }
+    await fetchUserSchedule()
+
+    // Only load handoff for Chatters (they see ModelReportsSection)
+    if (!isContentManager.value && !isMarketing.value) {
+      await loadHandoff()
+    }
+
+    // Start customs notifications polling (only for Chatters and Managers, not Marketing)
+    if (!isMarketing.value) {
+      customsNotifications.start()
     }
   } catch { }
 
@@ -710,9 +589,10 @@ onUnmounted(() => {
                 <!-- Modular Tracker/Timer Card -->
                 <TrackerCard 
                   data-tour="shift-status"
-                  :effective-work-seconds="effectiveWorkSeconds" 
+                  :effective-work-seconds="effectiveWorkSeconds"
+                  :idle-time="shiftState.idleTime"
                   :is-working="isWorking"
-                  :is-paused="isPaused" 
+                  :is-paused="isPaused"
                   :status-label="statusLabel" 
                   :status-dot="statusDot"
                   :shift-start-time="shiftState.shiftStartTime ?? undefined" 
@@ -800,6 +680,11 @@ onUnmounted(() => {
             <!-- Case: PUBLICACIONES (Marketing only) -->
             <template v-else-if="activeTab === 'publications'">
               <PublicationsCalendar :assigned-models="assignedModels" />
+            </template>
+
+            <!-- Case: COMPROBANTES DE PAGO -->
+            <template v-else-if="activeTab === 'receipts'">
+              <PaymentReceiptsSection />
             </template>
 
           </div>

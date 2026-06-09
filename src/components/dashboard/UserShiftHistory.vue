@@ -31,12 +31,6 @@ onMounted(async () => {
   try {
     const res = await api.get('/shifts/me/history')
     pastShifts.value = res.data.content || res.data || []
-    // Debug: ver estructura de datos
-    if (pastShifts.value.length > 0) {
-      console.log('🔍 Primer shift:', pastShifts.value[0])
-      console.log('🔍 Reports:', pastShifts.value[0].reports)
-      console.log('🔍 Model reports:', getModelReports(pastShifts.value[0]))
-    }
   } catch (e) {
     pastShifts.value = []
   } finally {
@@ -101,6 +95,14 @@ const efficiencyPct = (shift: any) => {
   return Math.min(100, Math.round((shift.activeTimeSeconds / totalSecs) * 100))
 }
 
+// Objetivo, cumplimiento (efectivo vs objetivo), tiempo adeudado y AFK del turno.
+const targetSecs = (shift: any) => shift.targetSeconds || 28800
+const owedSecs = (shift: any) =>
+  shift.isExtraHours ? 0 : Math.max(0, targetSecs(shift) - (shift.activeTimeSeconds || 0))
+const compliancePct = (shift: any) =>
+  Math.min(100, Math.round(((shift.activeTimeSeconds || 0) / targetSecs(shift)) * 100))
+const idleSecs = (shift: any) => shift.idleTimeSeconds || 0
+
 const shiftEarnings = (shift: any) => {
   const reports = shift.reports || []
   return reports.reduce((acc: number, r: any) => acc + (r.earnings || 0), 0)
@@ -145,6 +147,8 @@ const globalStats = computed(() => {
   const avgEfficiency = Math.round(pastShifts.value.reduce((acc, s) => acc + efficiencyPct(s), 0) / pastShifts.value.length)
   const totalSpendersCount = pastShifts.value.reduce((acc, s) => acc + totalSpenders(s), 0)
   const totalContentCount = pastShifts.value.reduce((acc, s) => acc + totalContent(s), 0)
+  const totalOwed = pastShifts.value.reduce((acc, s) => acc + owedSecs(s), 0)
+  const avgCompliance = Math.round(pastShifts.value.reduce((acc, s) => acc + compliancePct(s), 0) / pastShifts.value.length)
 
   if (isMarketing.value) {
     return [
@@ -158,7 +162,9 @@ const globalStats = computed(() => {
   return [
     { l: 'Total Facturado', v: formatMoney(totalEarningsValue), i: DollarSign, c: 'text-emerald-500', sub: 'Ganancias acumuladas totales', accent: 'bg-emerald-500' },
     { l: 'Tiempo Activo', v: formatTime(totalActiveSecs), i: Clock, c: 'text-blue-500', sub: 'Horas totales cronometradas', accent: 'bg-blue-500' },
-    { l: 'Rendimiento', v: avgEfficiency + '%', i: Target, c: 'text-violet-500', sub: 'Eficiencia promedio global', accent: 'bg-violet-500' },
+    { l: 'Cumplimiento', v: avgCompliance + '%', i: Target, c: 'text-violet-500', sub: 'Tiempo efectivo vs objetivo (promedio)', accent: 'bg-violet-500' },
+    { l: 'Tiempo Adeudado', v: formatTime(totalOwed), i: Timer, c: 'text-rose-500', sub: 'Tiempo que faltó para llegar al objetivo (suma)', accent: 'bg-rose-500' },
+    { l: 'Rendimiento', v: avgEfficiency + '%', i: Zap, c: 'text-sky-500', sub: 'Eficiencia promedio global', accent: 'bg-sky-500' },
     { l: 'Spenders', v: totalSpendersCount, i: Star, c: 'text-amber-500', sub: 'Total de clientes captados', accent: 'bg-amber-500' }
   ]
 })
@@ -168,7 +174,8 @@ const globalStats = computed(() => {
   <div class="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
 
     <!-- Top Global Stats -->
-    <div v-if="!loading && pastShifts.length" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+    <div v-if="!loading && pastShifts.length" class="grid grid-cols-1 sm:grid-cols-2 gap-4"
+      :class="isMarketing ? 'lg:grid-cols-4' : 'lg:grid-cols-3'">
       <TooltipProvider :delay-duration="100">
         <Card v-for="k in globalStats" :key="k.l"
           class="border-border/40 bg-card/50 backdrop-blur-sm hover:border-border transition-all duration-300 relative overflow-hidden group hover:-translate-y-1">
@@ -254,6 +261,13 @@ const globalStats = computed(() => {
                           <span class="text-[10px] font-bold text-blue-600 dark:text-blue-400">{{
                             getScheduleLabel(shift) }}</span>
                         </div>
+                        <div v-if="owedSecs(shift) > 0" class="flex items-center gap-1">
+                          <Timer class="w-2.5 h-2.5 text-rose-500" />
+                          <span class="text-[10px] font-bold text-rose-600 dark:text-rose-400">Adeudó {{
+                            formatTime(owedSecs(shift)) }}</span>
+                        </div>
+                        <span v-if="shift.forceClosed"
+                          class="text-[9px] font-black px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 uppercase tracking-wide">Forzado</span>
                       </div>
                     </div>
                   </div>
@@ -325,6 +339,15 @@ const globalStats = computed(() => {
                   <!-- Left Side: Analysis -->
                   <div class="space-y-6">
                     <div>
+                      <div v-if="owedSecs(shift) > 0"
+                        class="mb-4 p-3 rounded-xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/50 dark:border-amber-800/30 flex items-start gap-2">
+                        <Info class="w-3.5 h-3.5 text-amber-500 mt-0.5 shrink-0" />
+                        <p class="text-[11px] text-amber-800 dark:text-amber-300 leading-snug">
+                          Te faltaron <b>{{ formatTime(owedSecs(shift)) }}</b> para el objetivo de <b>{{
+                            formatTime(targetSecs(shift)) }}</b>. El tiempo AFK (<b>{{ formatTime(idleSecs(shift)) }}</b>)
+                          no cuenta como trabajo efectivo.
+                        </p>
+                      </div>
                       <h4
                         class="text-xs font-black uppercase tracking-widest text-muted-foreground mb-4 flex items-center gap-2">
                         <Code2 class="w-3 h-3" />
@@ -342,6 +365,17 @@ const globalStats = computed(() => {
                           <p class="text-sm font-black">{{ formatHour(shift.endTime) }}</p>
                           <p class="text-[10px] text-muted-foreground font-medium">{{ formatSimpleDate(shift.endTime) }}
                             · Duración: {{ formatDuration(shift.startTime, shift.endTime) }}</p>
+                        </div>
+                        <div class="p-3 rounded-2xl bg-zinc-50/50 dark:bg-zinc-900/50 border border-border/50">
+                          <p class="text-[10px] font-bold text-muted-foreground uppercase mb-1">Tiempo AFK</p>
+                          <p class="text-sm font-black" :class="idleSecs(shift) > 0 ? 'text-orange-500' : ''">{{
+                            formatTime(idleSecs(shift)) }}</p>
+                          <p class="text-[10px] text-muted-foreground font-medium">Inactividad detectada</p>
+                        </div>
+                        <div class="p-3 rounded-2xl bg-zinc-50/50 dark:bg-zinc-900/50 border border-border/50">
+                          <p class="text-[10px] font-bold text-muted-foreground uppercase mb-1">Cumplimiento</p>
+                          <p class="text-sm font-black">{{ compliancePct(shift) }}%</p>
+                          <p class="text-[10px] text-muted-foreground font-medium">Efectivo vs objetivo</p>
                         </div>
                       </div>
                     </div>

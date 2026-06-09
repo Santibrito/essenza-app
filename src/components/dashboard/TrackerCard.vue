@@ -30,6 +30,7 @@ interface ScheduleInfo {
 
 const props = defineProps<{
   effectiveWorkSeconds: number
+  idleTime?: number
   isWorking: boolean
   isPaused: boolean
   statusLabel: string
@@ -208,6 +209,27 @@ const assignedEnd = computed(() => {
         <div class="h-full bg-emerald-500 transition-all duration-300 shadow-[0_0_10px_rgba(16,185,129,0.3)]"
           :style="{ width: `${progressPercent}%` }" />
       </div>
+
+      <!-- Aviso en vivo: cuánto falta para la meta + AFK acumulado -->
+      <div v-if="isWorking" class="space-y-2 pt-0.5">
+        <div class="flex flex-wrap items-center gap-2">
+          <span v-if="remainingSeconds > 0"
+            class="inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-lg bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+            <Timer class="w-3 h-3" /> Te falta {{ formatMetaLabel(remainingSeconds) }} para la meta
+          </span>
+          <span v-else
+            class="inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+            <CheckCircle2 class="w-3 h-3" /> Meta diaria cumplida
+          </span>
+          <span v-if="(idleTime || 0) > 0"
+            class="inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-lg bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20">
+            <AlertTriangle class="w-3 h-3" /> AFK {{ formatMetaLabel(idleTime || 0) }}
+          </span>
+        </div>
+        <p v-if="(idleTime || 0) > 0" class="text-[10px] text-orange-600/80 dark:text-orange-400/80 leading-snug">
+          El tiempo AFK (inactivo) no cuenta como trabajo efectivo ni suma a tu meta. Mantené actividad para no acumularlo.
+        </p>
+      </div>
     </div>
 
     <!-- Actions -->
@@ -223,7 +245,7 @@ const assignedEnd = computed(() => {
             {{ isPaused ? 'Retomar' : 'Break' }}
           </Button>
           <Button variant="destructive" size="sm" class="h-9 px-4  text-white" @click="emit('endShift')"
-            title="Si todavía no llegaste a la meta, tocá dos veces para abandonar el turno (te pide un motivo)">
+            title="Terminás tu turno y generás el reporte de cierre.">
             Terminar
           </Button>
         </div>

@@ -4,35 +4,29 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ExternalLink, User, CheckCircle2, Clock, AlertTriangle } from 'lucide-vue-next'
 import { TYPE, STATUS, parseTemplate, fmt } from './customs.config.js'
+import api from '@/api'
 
 const props = defineProps({ custom: { type: Object, required: true } })
 const emit = defineEmits(['open'])
 
 // User names cache
 const userNamesCache = ref({})
-import { API_BASE_URL as apiUrl } from '@/config.js'
 
 // Función para obtener el nombre real de un usuario por username
 async function fetchUserRealName(username) {
   if (!username) return username
-  
+
   // Check cache first
   if (userNamesCache.value[username]) {
     return userNamesCache.value[username]
   }
-  
+
   try {
-    const token = localStorage.getItem('token')
-    const res = await fetch(`${apiUrl}/admin/users`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
-    if (res.ok) {
-      const users = await res.json()
-      const user = users.find(u => u.username === username)
-      if (user?.name) {
-        userNamesCache.value[username] = user.name
-        return user.name
-      }
+    const res = await api.get('/admin/users')
+    const user = (res.data || []).find(u => u.username === username)
+    if (user?.name) {
+      userNamesCache.value[username] = user.name
+      return user.name
     }
   } catch (error) {
     console.log(`No se pudo obtener el nombre real para ${username}`)

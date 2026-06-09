@@ -525,9 +525,9 @@ class ShiftManager {
     try {
       if (window.electronAPI?.screen) {
         const screenshots = await window.electronAPI.screen.takeScreenshot({
-          quality: 0.5,
-          maxWidth: 800,
-          maxHeight: 450
+          quality: 0.7,
+          maxWidth: 1280,
+          maxHeight: 720
         })
         
         if (screenshots?.length > 0) {

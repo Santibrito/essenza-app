@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import {
   Radio, History, Users, Lightbulb, ClipboardCheck,
-  LogOut, X, ChevronRight, Settings, Calendar, Package, BarChart3
+  LogOut, X, ChevronRight, Settings, Calendar, Package, BarChart3, Receipt
 } from 'lucide-vue-next'
 import { ref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import ProfileSettingsSheet from '@/components/dashboard/ProfileSettingsSheet.vue'
 import packageJson from '../../../package.json'
 
-type TabType = 'tracker' | 'history' | 'crm' | 'creative' | 'context' | 'customs' | 'publications' | 'marketing'
+type TabType = 'tracker' | 'history' | 'crm' | 'creative' | 'context' | 'customs' | 'publications' | 'marketing' | 'receipts'
 
 const props = defineProps<{
   activeTab: TabType
@@ -36,6 +36,7 @@ const sections = [
     items: [
       { id: 'tracker' as TabType, label: 'Control de Turno', icon: Radio, color: 'text-emerald-500', bg: 'bg-emerald-500/10', show: true },
       { id: 'history' as TabType, label: props.isContentManager ? 'Customs Pendientes' : 'Mi Rendimiento', icon: History, color: 'text-sky-500', bg: 'bg-sky-500/10', show: !props.isContentManager },
+      { id: 'receipts' as TabType, label: 'Comprobantes de Pago', icon: Receipt, color: 'text-green-500', bg: 'bg-green-500/10', show: true },
     ]
   },
   {

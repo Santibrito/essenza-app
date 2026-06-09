@@ -157,8 +157,28 @@ onMounted(() => {
        </div>
     </div>
 
+    <!-- Loading -->
+    <div v-if="loading" class="flex flex-col items-center justify-center py-32 gap-3 text-muted-foreground">
+      <div class="w-7 h-7 rounded-full border-2 border-muted-foreground/30 border-t-transparent animate-spin" />
+      <p class="text-[10px] font-bold uppercase tracking-widest">Cargando leads…</p>
+    </div>
+
+    <!-- Empty global (sin ningún lead) -->
+    <div v-else-if="leads.length === 0"
+      class="flex flex-col items-center justify-center py-28 text-center border-2 border-dashed border-border/40 rounded-[2.5rem] bg-muted/10">
+      <div class="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-5">
+        <UserPlus class="w-8 h-8 text-muted-foreground/40" />
+      </div>
+      <p class="text-base font-black uppercase tracking-tight">Todavía no hay prospectos</p>
+      <p class="text-xs text-muted-foreground mt-2 max-w-[280px]">Agregá tu primera modelo prospecto para empezar a gestionar la captación.</p>
+      <Button @click="showCreateModal = true" size="sm"
+        class="mt-5 h-9 rounded-lg px-4 gap-2 font-black text-[10px] uppercase tracking-widest">
+        <Plus class="w-3.5 h-3.5" /> Agregar Lead
+      </Button>
+    </div>
+
     <!-- KANBAN BOARD -->
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-6 h-[70vh] overflow-x-auto pb-4">
+    <div v-else class="grid grid-cols-1 md:grid-cols-4 gap-6 h-[70vh] overflow-x-auto pb-4">
        <div v-for="col in columns" :key="col.id" class="flex flex-col gap-4 min-w-[280px]">
           <!-- Column Header -->
           <div class="flex items-center justify-between px-2">

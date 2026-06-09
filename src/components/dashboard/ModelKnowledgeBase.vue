@@ -14,6 +14,7 @@ import { Separator } from '@/components/ui/separator'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { useAuthStore } from '@/stores/auth'
+import api from '@/api'
 
 const props = defineProps<{
   assignedModels: any[]
@@ -31,28 +32,21 @@ const logbookEntries = ref<any[]>([])
 const loadingAnalytics = ref(false)
 const userNamesCache = ref<Record<string, string>>({})
 
-import { API_BASE_URL as apiUrl } from '@/config.js'
-
 // Función para obtener el nombre real de un usuario por username
 async function fetchUserRealName(username: string): Promise<string> {
   if (!username) return username
-  
+
   // Check cache first
   if (userNamesCache.value[username]) {
     return userNamesCache.value[username]
   }
-  
+
   try {
-    const res = await fetch(`${apiUrl}/admin/users`, {
-      headers: { 'Authorization': `Bearer ${auth.user?.token}` }
-    })
-    if (res.ok) {
-      const users = await res.json()
-      const user = users.find((u: any) => u.username === username)
-      if (user?.name) {
-        userNamesCache.value[username] = user.name
-        return user.name
-      }
+    const res = await api.get('/admin/users')
+    const user = (res.data || []).find((u: any) => u.username === username)
+    if (user?.name) {
+      userNamesCache.value[username] = user.name
+      return user.name
     }
   } catch (error) {
     console.log(`No se pudo obtener el nombre real para ${username}`)
@@ -74,25 +68,21 @@ async function fetchUserRealName(username: string): Promise<string> {
 async function fetchModels() {
   loading.value = true
   try {
-    const res = await fetch(`${apiUrl}/admin/models/active`, {
-      headers: { 'Authorization': `Bearer ${auth.user?.token}` }
-    })
-    if (res.ok) {
-      const data = await res.json()
+    const res = await api.get('/admin/models/active')
+    const data = res.data || []
 
-      // Filtrar solo las modelos que el chatter tiene asignadas según la prop
-      if (props.assignedModels && props.assignedModels.length > 0) {
-        const assignedIds = props.assignedModels.map(m => m.id)
-        models.value = data.filter((m: any) => assignedIds.includes(m.id))
-      } else {
-        models.value = []
-      }
+    // Filtrar solo las modelos que el chatter tiene asignadas según la prop
+    if (props.assignedModels && props.assignedModels.length > 0) {
+      const assignedIds = props.assignedModels.map(m => m.id)
+      models.value = data.filter((m: any) => assignedIds.includes(m.id))
+    } else {
+      models.value = []
+    }
 
-      if (models.value.length > 0) {
-        selectedModel.value = models.value[0]
-      } else {
-        selectedModel.value = null
-      }
+    if (models.value.length > 0) {
+      selectedModel.value = models.value[0]
+    } else {
+      selectedModel.value = null
     }
   } catch (err) {
     console.error('Error fetching models:', err)
@@ -104,25 +94,22 @@ async function fetchModels() {
 async function loadModelAnalytics(modelId: number) {
   loadingAnalytics.value = true
   try {
-    const headers = { 'Authorization': `Bearer ${auth.user?.token}` }
     const [tagsRes, spendersRes, logbookRes] = await Promise.all([
-      fetch(`${apiUrl}/admin/models/${modelId}/content-tags`, { headers }),
-      fetch(`${apiUrl}/admin/models/${modelId}/spenders`, { headers }),
-      fetch(`${apiUrl}/admin/models/${modelId}/logbook/latest`, { headers })
+      api.get(`/admin/models/${modelId}/content-tags`).catch(() => ({ data: [] })),
+      api.get(`/admin/models/${modelId}/spenders`).catch(() => ({ data: [] })),
+      api.get(`/admin/models/${modelId}/logbook/latest`).catch(() => ({ data: [] }))
     ])
 
-    if (tagsRes.ok) contentTags.value = await tagsRes.json()
-    if (spendersRes.ok) spenders.value = await spendersRes.json()
-    if (logbookRes.ok) {
-      const entries = await logbookRes.json()
-      // Process author names to show real names instead of usernames
-      logbookEntries.value = await Promise.all(
-        entries.map(async (entry: any) => ({
-          ...entry,
-          displayAuthorName: await fetchUserRealName(entry.authorName)
-        }))
-      )
-    }
+    contentTags.value = tagsRes.data || []
+    spenders.value = spendersRes.data || []
+    const entries = logbookRes.data || []
+    // Process author names to show real names instead of usernames
+    logbookEntries.value = await Promise.all(
+      entries.map(async (entry: any) => ({
+        ...entry,
+        displayAuthorName: await fetchUserRealName(entry.authorName)
+      }))
+    )
   } catch (err) {
     console.error('Error loading analytics:', err)
   } finally {

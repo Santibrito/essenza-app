@@ -531,9 +531,9 @@ ipcMain.handle('get-system-capabilities', () => {
     isLowEnd,
     recommendedScreenshotInterval: isLowEnd ? 10 * 60 * 1000 : 6 * 60 * 1000, // 10min vs 6min
     recommendedSyncInterval: isLowEnd ? 15000 : 10000, // 15s vs 10s
-    screenshotQuality: isLowEnd ? 0.3 : 0.5, // Lower quality for low-end systems
-    maxScreenshotWidth: isLowEnd ? 640 : 800,
-    maxScreenshotHeight: isLowEnd ? 360 : 450
+    screenshotQuality: isLowEnd ? 0.6 : 0.7, // Más nítidas para que se lean bien en el admin
+    maxScreenshotWidth: isLowEnd ? 1024 : 1280,
+    maxScreenshotHeight: isLowEnd ? 576 : 720
   }
 })
 
