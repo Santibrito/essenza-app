@@ -12,6 +12,7 @@ export interface IgAccountLite {
 
 export interface IgScheduleResult {
   count: number
+  skipped: number
   from: string
   to: string
   spreadMinutes: number

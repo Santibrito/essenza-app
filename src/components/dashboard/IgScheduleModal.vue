@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { toast } from 'vue-sonner'
-import { Loader2, Upload, X, CheckCircle2, Clock, Users } from 'lucide-vue-next'
+import { Loader2, Upload, X, CheckCircle2, Clock, Users, Flame, AlertTriangle, CheckCheck } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -40,11 +40,10 @@ const file = ref<File | null>(null)
 const filePreview = ref<string | null>(null)
 const saving = ref(false)
 
-const STATUS_LABEL: Record<string, string> = {
-  PROXY_READY: 'Proxy', IMPORTED: 'Importada', LOGGED_IN: 'Logueada', PHOTO_DONE: 'Foto',
-  BIO_DONE: 'Bio', WARMING: 'Calentando', READY: 'LISTA', SUSPENDED: 'Suspendida',
-  CHALLENGED: 'Verif.', BANNED: 'Baneada',
-}
+// Solo las cuentas LISTAS se pueden usar para publicar.
+const readyAccounts = computed(() => accounts.value.filter(a => a.status === 'READY'))
+const warmingCount = computed(() => accounts.value.filter(a => ['IMPORTED', 'LOGGED_IN', 'PHOTO_DONE', 'BIO_DONE', 'WARMING'].includes(a.status)).length)
+const deadCount = computed(() => accounts.value.filter(a => ['SUSPENDED', 'CHALLENGED', 'BANNED', 'PHONE_REQUIRED'].includes(a.status)).length)
 
 watch(() => props.open, (o) => {
   if (o) {
@@ -65,8 +64,8 @@ async function loadAccounts(modelId: number) {
   selected.value = new Set()
   try {
     accounts.value = await getAccounts(modelId)
-    // preseleccionar las que están LISTAS
-    accounts.value.forEach(a => { if (a.status === 'READY') selected.value.add(a.id) })
+    // Preseleccionar TODAS las listas (son las únicas que se pueden usar)
+    selected.value = new Set(readyAccounts.value.map(a => a.id))
   } catch (e: any) {
     toast.error('Error al cargar cuentas', { description: e.message })
   } finally {
@@ -79,8 +78,8 @@ function toggle(id: number) {
   else selected.value.add(id)
   selected.value = new Set(selected.value)
 }
-function selectAll() { selected.value = new Set(accounts.value.map(a => a.id)) }
-function selectReady() { selected.value = new Set(accounts.value.filter(a => a.status === 'READY').map(a => a.id)) }
+function selectAll() { selected.value = new Set(readyAccounts.value.map(a => a.id)) }
+function selectNone() { selected.value = new Set() }
 
 function onFile(e: Event) {
   const f = (e.target as HTMLInputElement).files?.[0]
@@ -98,7 +97,7 @@ const windowText = computed(() => {
 
 async function submit() {
   if (!file.value) { toast.error('Subí una imagen o video'); return }
-  if (selected.value.size === 0) { toast.error('Elegí al menos una cuenta'); return }
+  if (selected.value.size === 0) { toast.error('Elegí al menos una cuenta LISTA'); return }
   saving.value = true
   try {
     const res = await schedule({
@@ -112,7 +111,7 @@ async function submit() {
       spreadMinutes: form.value.spreadMinutes,
     }, file.value)
     toast.success(`Programado en ${res.count} cuenta${res.count !== 1 ? 's' : ''} 🎉`, {
-      description: `Se subirá entre las ${res.from} y las ${res.to}`,
+      description: `Se subirá entre las ${res.from} y las ${res.to}` + (res.skipped ? ` · ${res.skipped} salteada(s) por no estar lista(s)` : ''),
       duration: 8000,
     })
     emit('scheduled')
@@ -123,14 +122,16 @@ async function submit() {
     saving.value = false
   }
 }
+
+const CONTENT_LABEL: Record<string, string> = { REEL: 'Reel', STORY: 'Historia', POST: 'Post (foto)' }
 </script>
 
 <template>
   <Dialog :open="open" @update:open="emit('update:open', $event)">
     <DialogContent class="sm:max-w-lg">
       <DialogHeader>
-        <DialogTitle class="text-lg font-black flex items-center gap-2"><Users class="w-4 h-4 text-primary" /> Propagar a cuentas</DialogTitle>
-        <DialogDescription>Un contenido → varias cuentas de la modelo, con horarios desparejos para no parecer bot.</DialogDescription>
+        <DialogTitle class="text-lg font-black flex items-center gap-2"><Users class="w-4 h-4 text-violet-500" /> Programar publicación</DialogTitle>
+        <DialogDescription>Un contenido → una o varias cuentas <b>LISTAS</b> de la modelo, con horarios desparejos para no parecer bot.</DialogDescription>
       </DialogHeader>
 
       <div class="space-y-4 py-2 max-h-[65vh] overflow-y-auto pr-1">
@@ -152,38 +153,61 @@ async function submit() {
           </div>
         </div>
 
-        <!-- Cuentas (multi-select) -->
+        <!-- Cuentas (solo LISTAS) -->
         <div class="space-y-1.5">
           <div class="flex items-center justify-between">
-            <Label class="text-xs font-bold uppercase tracking-wide text-zinc-500">Cuentas ({{ selected.size }} elegidas)</Label>
-            <div class="flex gap-2 text-[10px] font-bold">
-              <button @click="selectReady" class="text-emerald-600 hover:underline">Solo LISTAS</button>
-              <button @click="selectAll" class="text-primary hover:underline">Todas</button>
+            <Label class="text-xs font-bold uppercase tracking-wide text-zinc-500">Cuentas listas ({{ selected.size }}/{{ readyAccounts.length }})</Label>
+            <div v-if="readyAccounts.length" class="flex gap-2 text-[10px] font-bold">
+              <button type="button" @click="selectAll" class="text-primary hover:underline">Todas</button>
+              <button type="button" @click="selectNone" class="text-zinc-400 hover:underline">Ninguna</button>
             </div>
           </div>
+
           <div v-if="loadingAccounts" class="flex justify-center py-4"><Loader2 class="w-4 h-4 animate-spin text-primary" /></div>
-          <div v-else-if="accounts.length === 0" class="text-xs text-zinc-400 text-center py-4 border border-dashed rounded-lg">Esta modelo no tiene cuentas IG enganchadas.</div>
-          <div v-else class="max-h-44 overflow-y-auto space-y-1 border border-border/50 rounded-lg p-1.5">
-            <label v-for="a in accounts" :key="a.id"
-              class="flex items-center gap-2.5 px-2 py-1.5 rounded-md cursor-pointer hover:bg-muted/50"
-              :class="selected.has(a.id) ? 'bg-primary/5' : ''">
-              <input type="checkbox" :checked="selected.has(a.id)" @change="toggle(a.id)" class="h-4 w-4 accent-primary" />
-              <div class="w-6 h-6 rounded-full bg-muted overflow-hidden shrink-0">
-                <img v-if="a.profilePhotoUrl" :src="a.profilePhotoUrl" class="w-full h-full object-cover" />
-              </div>
-              <span class="text-xs font-bold truncate flex-1">@{{ a.igUsername }}</span>
-              <span class="text-[9px] font-black uppercase px-1.5 py-0.5 rounded"
-                :class="a.status === 'READY' ? 'bg-emerald-500/10 text-emerald-600' : 'bg-amber-500/10 text-amber-600'">
-                {{ STATUS_LABEL[a.status] || a.status }}
-              </span>
-            </label>
+
+          <div v-else-if="readyAccounts.length === 0" class="rounded-xl border border-dashed border-amber-400/40 bg-amber-500/5 p-4 text-center space-y-1">
+            <Flame class="w-6 h-6 mx-auto text-amber-500/70" />
+            <p class="text-xs font-bold text-zinc-700 dark:text-zinc-300">No hay cuentas LISTAS para esta modelo</p>
+            <p class="text-[11px] text-zinc-500 leading-snug">
+              <template v-if="warmingCount">Hay {{ warmingCount }} todavía calentando. </template>Enganchá o terminá de calentar una cuenta en el CRM (pestaña “Cuentas IG”).
+            </p>
           </div>
+
+          <template v-else>
+            <div class="max-h-44 overflow-y-auto space-y-1 border border-border/50 rounded-lg p-1.5">
+              <label v-for="a in readyAccounts" :key="a.id"
+                class="flex items-center gap-2.5 px-2 py-1.5 rounded-md cursor-pointer hover:bg-muted/50 transition-colors"
+                :class="selected.has(a.id) ? 'bg-emerald-500/5 ring-1 ring-emerald-500/20' : ''">
+                <input type="checkbox" :checked="selected.has(a.id)" @change="toggle(a.id)" class="h-4 w-4 accent-emerald-500" />
+                <div class="w-7 h-7 rounded-full bg-muted overflow-hidden shrink-0 flex items-center justify-center">
+                  <img v-if="a.profilePhotoUrl" :src="a.profilePhotoUrl" class="w-full h-full object-cover" />
+                  <Users v-else class="w-3 h-3 text-muted-foreground/40" />
+                </div>
+                <div class="min-w-0 flex-1">
+                  <span class="text-xs font-bold truncate block">@{{ a.igUsername }}</span>
+                  <span v-if="a.followers != null" class="text-[10px] text-zinc-400 tabular-nums">{{ a.followers }} seguidores</span>
+                </div>
+                <span class="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 flex items-center gap-1">
+                  <CheckCheck class="w-2.5 h-2.5" /> Lista
+                </span>
+              </label>
+            </div>
+            <p v-if="warmingCount || deadCount" class="flex items-center gap-1.5 text-[10px] text-zinc-400 px-0.5">
+              <AlertTriangle class="w-3 h-3 shrink-0" />
+              <span>
+                <template v-if="warmingCount">{{ warmingCount }} calentando</template>
+                <template v-if="warmingCount && deadCount"> · </template>
+                <template v-if="deadCount">{{ deadCount }} con problema</template>
+                — no disponibles para publicar.
+              </span>
+            </p>
+          </template>
         </div>
 
         <!-- Archivo -->
         <div class="space-y-1.5">
           <Label class="text-xs font-bold uppercase tracking-wide text-zinc-500">Archivo</Label>
-          <div class="border-2 border-dashed border-zinc-200 dark:border-zinc-700 rounded-xl p-3 cursor-pointer hover:border-primary/50"
+          <div class="border-2 border-dashed border-zinc-200 dark:border-zinc-700 rounded-xl p-3 cursor-pointer hover:border-primary/50 transition-colors"
             @click="($refs.f as HTMLInputElement)?.click()">
             <input ref="f" type="file" accept="image/*,video/mp4,video/quicktime" class="hidden" @change="onFile" />
             <div v-if="file" class="flex items-center gap-3">
@@ -231,15 +255,17 @@ async function submit() {
         </div>
 
         <!-- Ventana -->
-        <div class="flex items-center gap-2 rounded-xl bg-primary/5 border border-primary/20 p-3 text-sm">
-          <Clock class="w-4 h-4 text-primary shrink-0" />
-          <span class="text-zinc-700 dark:text-zinc-300">Se subirá <b>{{ windowText }}</b> · {{ selected.size }} cuenta{{ selected.size !== 1 ? 's' : '' }}</span>
+        <div class="flex items-center gap-2 rounded-xl bg-violet-500/5 border border-violet-500/20 p-3 text-sm">
+          <Clock class="w-4 h-4 text-violet-500 shrink-0" />
+          <span class="text-zinc-700 dark:text-zinc-300">
+            {{ CONTENT_LABEL[form.contentType] }} · se subirá <b>{{ windowText }}</b> en <b>{{ selected.size }}</b> cuenta{{ selected.size !== 1 ? 's' : '' }}
+          </span>
         </div>
       </div>
 
       <DialogFooter>
         <Button variant="outline" @click="emit('update:open', false)" :disabled="saving">Cancelar</Button>
-        <Button @click="submit" :disabled="saving" class="gap-2">
+        <Button @click="submit" :disabled="saving || selected.size === 0" class="gap-2 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white border-0 hover:from-violet-700 hover:to-fuchsia-700">
           <Loader2 v-if="saving" class="w-4 h-4 animate-spin" /><CheckCircle2 v-else class="w-4 h-4" />
           {{ saving ? 'Programando...' : 'Programar' }}
         </Button>
