@@ -4,7 +4,7 @@ import { toast } from 'vue-sonner'
 import api from '@/api'
 import {
   ChevronLeft, ChevronRight, Plus, Instagram, X,
-  Clock, Upload, Calendar, Loader2, AlertTriangle, CheckCircle2, Trash2
+  Clock, Upload, Calendar, Loader2, AlertTriangle, CheckCircle2, Trash2, Users
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -24,6 +24,8 @@ import {
   STATUS_COLORS,
 } from '@/lib/usePublications'
 import { useAuthStore } from '@/stores/auth'
+import { useIgPosts } from '@/lib/useIgPosts'
+import IgScheduleModal from '@/components/dashboard/IgScheduleModal.vue'
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 const props = defineProps<{
@@ -31,7 +33,16 @@ const props = defineProps<{
 }>()
 
 const auth = useAuthStore()
-const { loading, getCalendar, create, cancel } = usePublications()
+const { loading, getCalendar, create, publishNow, cancel } = usePublications()
+const { getCalendar: igGetCalendar } = useIgPosts()
+
+// Modal de propagación multi-cuenta (cuentas IG)
+const showIgSchedule = ref(false)
+const igScheduleDate = ref<string | undefined>(undefined)
+function openIgSchedule(date?: Date) {
+  igScheduleDate.value = date ? formatDateInput(date) : undefined
+  showIgSchedule.value = true
+}
 
 // ── Calendar state ────────────────────────────────────────────────────────────
 const today = new Date()
@@ -86,10 +97,34 @@ function nextMonth() {
   else currentMonth.value++
 }
 
+function goToday() {
+  currentYear.value  = today.getFullYear()
+  currentMonth.value = today.getMonth() + 1
+}
+
+function isWeekend(date: Date | null) {
+  if (!date) return false
+  const d = date.getDay()
+  return d === 0 || d === 6
+}
+
 async function loadCalendar() {
   calendarLoading.value = true
   try {
-    publications.value = await getCalendar(currentYear.value, currentMonth.value)
+    const [oldPubs, igPosts] = await Promise.all([
+      getCalendar(currentYear.value, currentMonth.value),
+      igGetCalendar(currentYear.value, currentMonth.value),
+    ])
+    const igMapped = (igPosts || []).map((p: any) => ({
+      id: 'ig' + p.id,
+      modelName: p.handle ? '@' + p.handle : p.modelName,
+      platform: 'INSTAGRAM',
+      contentType: p.contentType,
+      scheduledAt: p.scheduledAt,
+      status: p.status,
+      isIg: true,
+    }))
+    publications.value = [...(oldPubs || []), ...igMapped] as any
   } catch (e: any) {
     toast.error('Error al cargar el calendario', { description: e.message })
   } finally {
@@ -111,8 +146,11 @@ function selectDay(day: { date: Date | null; pubs: ScheduledPublication[] }) {
 // ── Create modal ──────────────────────────────────────────────────────────────
 const showCreateModal = ref(false)
 const testingAdsPower = ref(false)
-const testingReel = ref(false)
 const createLoading = ref(false)
+
+// Modo "Probar ahora" (publicación inmediata) + dry-run (no publicar, solo auditar)
+const testMode = ref(false)
+const dryRun = ref(true)
 
 // Accounts list for selected model
 const accountsLoading = ref(false)
@@ -203,7 +241,9 @@ watch(() => form.value.modelId, (id) => {
   }
 })
 
-function openCreateModal(date?: Date) {
+function openCreateModal(date?: Date, test = false) {
+  testMode.value = test
+  dryRun.value = true
   // Reset form
   const firstModel = props.assignedModels?.[0]
   form.value = {
@@ -273,6 +313,34 @@ async function submitCreate() {
     toast.error('Seleccioná un usuario/perfil de esa red social')
     return
   }
+
+  // ── Modo "Probar ahora": publica al instante (con dry-run) en vez de programar ──
+  if (testMode.value) {
+    createLoading.value = true
+    try {
+      const result = await publishNow({
+        accountId:   form.value.accountId,
+        platform:    form.value.platform,
+        contentType: form.value.contentType,
+        caption:     needsCaptionAndHashtags.value ? (form.value.caption || undefined) : undefined,
+        hashtags:    needsCaptionAndHashtags.value ? (form.value.hashtags || undefined) : undefined,
+        customLink:  needsCustomLink.value ? (form.value.customLink || undefined) : undefined,
+        dryRun:      dryRun.value,
+      }, selectedFile.value)
+
+      toast.success(result.dryRun ? '🔍 Auditoría OK (no se publicó)' : '🎉 Publicado al instante', {
+        description: (result.message || '') + ' — Mirá AdsPower para ver el flujo. Se cierra en 15s.',
+        duration: 9000
+      })
+      showCreateModal.value = false
+    } catch (e: any) {
+      toast.error('❌ Error en la prueba', { description: e.message, duration: 10000 })
+    } finally {
+      createLoading.value = false
+    }
+    return
+  }
+
   if (!form.value.date || !form.value.time) {
     toast.error('Seleccioná fecha y hora')
     return
@@ -344,86 +412,30 @@ async function cancelPublication(id: number) {
 // ── Test AdsPower connection ──────────────────────────────────────────────────
 async function testAdsPower() {
   testingAdsPower.value = true
-  
+
   try {
-    // Test directo a AdsPower sin pasar por el backend
-    const adsPowerUrl = 'http://127.0.0.1:50325/api/v1/browser/start?user_id=k1d1iycv&api_key=61bffeeaa120f458df9a3960cb34d6e4008fb4588ea92687'
-    
-    const response = await fetch(adsPowerUrl, {
-      method: 'GET',
-      mode: 'no-cors' // Para evitar problemas de CORS
-    })
-    
-    // Como usamos no-cors, no podemos leer la respuesta, pero si no da error significa que AdsPower responde
-    toast.success('✅ AdsPower conectado correctamente', {
-      description: 'Conexión establecida con AdsPower',
-      duration: 5000
-    })
-    
-    // Try to close the browser after 3 seconds
-    setTimeout(async () => {
-      try {
-        const stopUrl = 'http://127.0.0.1:50325/api/v1/browser/stop?user_id=k1d1iycv&api_key=61bffeeaa120f458df9a3960cb34d6e4008fb4588ea92687'
-        await fetch(stopUrl, { method: 'GET', mode: 'no-cors' })
-        toast.info('Browser cerrado automáticamente')
-      } catch (e) {
-        console.warn('Could not auto-close browser:', e)
-      }
-    }, 3000)
-    
+    // El backend usa su propia config (API key del servidor). Nada de credenciales en el front.
+    const response = await api.get('/automation/test/adspower/ping')
+
+    if (response.data.success) {
+      toast.success('✅ AdsPower conectado correctamente', {
+        description: response.data.message,
+        duration: 5000
+      })
+    } else {
+      throw new Error(response.data.error || 'AdsPower no respondió')
+    }
   } catch (error: any) {
     console.error('AdsPower test failed:', error)
-    
-    let errorMsg = 'Error desconocido'
-    if (error.message) {
-      errorMsg = error.message
-    }
-    
+
+    const errorMsg = error.response?.data?.error || error.message || 'Error desconocido'
+
     toast.error('❌ AdsPower no responde', {
-      description: errorMsg,
+      description: errorMsg + ' — Verificá que AdsPower esté abierto.',
       duration: 8000
     })
   } finally {
     testingAdsPower.value = false
-  }
-}
-
-// ── Test Instagram Reel publication ───────────────────────────────────────────
-async function testInstagramReel() {
-  testingReel.value = true
-  
-  try {
-    const response = await api.post('/automation/test/publish/instagram-reel-quick', {
-      profileId: 'k1d1iycv',
-      mediaUrl: 'https://sample-videos.com/zip/10/mp4/SampleVideo_1280x720_1mb.mp4',
-      caption: 'Test desde ESSENZA 🚀 #automation #test',
-      hashtags: '#essenza #test #automation #instagram'
-    })
-    
-    if (response.data.success) {
-      toast.success('🎉 Reel publicado correctamente!', {
-        description: 'El navegador se cerrará automáticamente en 10 segundos',
-        duration: 8000
-      })
-    } else {
-      throw new Error(response.data.error || 'Error desconocido')
-    }
-  } catch (error: any) {
-    console.error('Instagram Reel test failed:', error)
-    
-    let errorMsg = 'Error desconocido'
-    if (error.response?.data?.error) {
-      errorMsg = error.response.data.error
-    } else if (error.message) {
-      errorMsg = error.message
-    }
-    
-    toast.error('❌ Error publicando Reel', {
-      description: errorMsg,
-      duration: 10000
-    })
-  } finally {
-    testingReel.value = false
   }
 }
 
@@ -452,53 +464,55 @@ function platformColor(platform: SocialPlatform) {
     <div class="flex-1 flex flex-col min-w-0">
 
       <!-- Header -->
-      <div class="flex items-center justify-between mb-6">
+      <div class="flex items-center justify-between mb-5 gap-4 flex-wrap">
         <div class="flex items-center gap-3">
-          <button @click="prevMonth"
-            class="w-8 h-8 rounded-lg border border-zinc-200 dark:border-zinc-800 flex items-center justify-center hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
-            <ChevronLeft class="w-4 h-4" />
-          </button>
-          <h2 class="text-lg font-black text-zinc-900 dark:text-zinc-50 tracking-tight min-w-[180px] text-center">
-            {{ MONTH_NAMES[currentMonth - 1] }} {{ currentYear }}
+          <h2 class="text-xl font-black text-zinc-900 dark:text-zinc-50 tracking-tight">
+            {{ MONTH_NAMES[currentMonth - 1] }}
+            <span class="text-zinc-400 dark:text-zinc-600 font-bold">{{ currentYear }}</span>
           </h2>
-          <button @click="nextMonth"
-            class="w-8 h-8 rounded-lg border border-zinc-200 dark:border-zinc-800 flex items-center justify-center hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
-            <ChevronRight class="w-4 h-4" />
-          </button>
+          <div class="flex items-center gap-1">
+            <button @click="prevMonth"
+              class="w-7 h-7 rounded-lg border border-zinc-200 dark:border-zinc-800 flex items-center justify-center hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
+              <ChevronLeft class="w-4 h-4" />
+            </button>
+            <button @click="goToday"
+              class="h-7 px-3 rounded-lg border border-zinc-200 dark:border-zinc-800 text-xs font-bold hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
+              Hoy
+            </button>
+            <button @click="nextMonth"
+              class="w-7 h-7 rounded-lg border border-zinc-200 dark:border-zinc-800 flex items-center justify-center hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
+              <ChevronRight class="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
-        <Button @click="openCreateModal()" class="gap-2 h-9">
-          <Plus class="w-4 h-4" />
-          <span class="text-sm font-semibold">Nueva Publicación</span>
-        </Button>
-        
-        <Button 
-          @click="testAdsPower"
-          :disabled="testingAdsPower"
-          variant="outline"
-          class="gap-2 h-9 border-green-200 text-green-700 hover:bg-green-50"
-        >
-          <Loader2 v-if="testingAdsPower" class="w-4 h-4 animate-spin" />
-          <span v-else class="text-lg">🔧</span>
-          <span class="text-sm font-semibold">Test AdsPower</span>
-        </Button>
-        
-        <Button 
-          @click="testInstagramReel"
-          :disabled="testingReel"
-          variant="outline"
-          class="gap-2 h-9 border-purple-200 text-purple-700 hover:bg-purple-50"
-        >
-          <Loader2 v-if="testingReel" class="w-4 h-4 animate-spin" />
-          <span v-else class="text-lg">🎬</span>
-          <span class="text-sm font-semibold">Test Reel</span>
-        </Button>
+        <div class="flex items-center gap-3">
+          <div class="hidden md:flex items-center gap-3 text-[10px] font-bold text-zinc-400">
+            <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-pink-500"></span>Instagram</span>
+            <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-cyan-500"></span>TikTok</span>
+          </div>
+          <Button @click="openCreateModal(undefined, true)" variant="ghost"
+            class="gap-1.5 h-9 text-purple-600 dark:text-purple-400 hover:bg-purple-500/10">
+            <span class="text-base">⚡</span>
+            <span class="text-sm font-semibold">Probar</span>
+          </Button>
+          <Button @click="openCreateModal()" variant="outline" class="gap-2 h-9">
+            <Plus class="w-4 h-4" />
+            <span class="text-sm font-semibold">Individual</span>
+          </Button>
+          <Button @click="openIgSchedule()"
+            class="gap-2 h-9 shadow-sm bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white border-0 hover:from-violet-700 hover:to-fuchsia-700">
+            <Users class="w-4 h-4" />
+            <span class="text-sm font-semibold">Propagar a cuentas</span>
+          </Button>
+        </div>
       </div>
 
       <!-- Day names -->
       <div class="grid grid-cols-7 mb-2">
-        <div v-for="day in DAY_NAMES" :key="day"
-          class="text-center text-[10px] font-black text-zinc-400 dark:text-zinc-600 uppercase tracking-widest py-2">
+        <div v-for="(day, i) in DAY_NAMES" :key="day"
+          :class="['text-center text-[10px] font-black uppercase tracking-widest py-2',
+                   (i === 0 || i === 6) ? 'text-zinc-300 dark:text-zinc-700' : 'text-zinc-400 dark:text-zinc-600']">
           {{ day }}
         </div>
       </div>
@@ -509,55 +523,61 @@ function platformColor(platform: SocialPlatform) {
           <Loader2 class="w-6 h-6 animate-spin text-primary" />
         </div>
 
-        <div class="grid grid-cols-7 gap-1">
+        <div class="grid grid-cols-7 gap-1.5">
           <div
             v-for="(day, idx) in calendarDays"
             :key="idx"
             @click="day.date && selectDay(day)"
             :class="[
-              'min-h-[90px] rounded-xl border p-2 transition-all duration-150',
+              'group min-h-[118px] rounded-xl border p-1.5 transition-all duration-150 flex flex-col',
               day.date
-                ? 'cursor-pointer hover:border-primary/40 hover:bg-primary/5'
+                ? 'cursor-pointer hover:border-primary/40 hover:shadow-sm'
                 : 'opacity-0 pointer-events-none',
               isToday(day.date)
-                ? 'border-primary/50 bg-primary/5'
-                : 'border-zinc-100 dark:border-zinc-800/60 bg-white dark:bg-zinc-900/30',
+                ? 'border-primary/40 bg-primary/[0.03]'
+                : isWeekend(day.date)
+                  ? 'border-zinc-100 dark:border-zinc-800/60 bg-zinc-50/60 dark:bg-zinc-900/20'
+                  : 'border-zinc-100 dark:border-zinc-800/60 bg-white dark:bg-zinc-900/30',
               selectedDay?.date?.toDateString() === day.date?.toDateString()
                 ? 'border-primary ring-1 ring-primary/30'
                 : ''
             ]"
           >
             <!-- Day number -->
-            <div class="flex items-center justify-between mb-1.5">
-              <span :class="[
-                'text-xs font-black leading-none',
-                isToday(day.date) ? 'text-primary' : 'text-zinc-700 dark:text-zinc-300'
-              ]">
+            <div class="flex items-center justify-between mb-1 px-0.5">
+              <span :class="isToday(day.date)
+                ? 'w-5 h-5 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[10px] font-black'
+                : 'text-xs font-black leading-none text-zinc-600 dark:text-zinc-400'">
                 {{ day.date?.getDate() }}
               </span>
               <button
                 v-if="day.date"
                 @click.stop="openCreateModal(day.date)"
-                class="w-4 h-4 rounded flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-primary/10 hover:text-primary transition-all"
+                class="w-5 h-5 rounded-md flex items-center justify-center opacity-0 group-hover:opacity-100 bg-primary/10 text-primary hover:bg-primary/20 transition-all"
               >
                 <Plus class="w-3 h-3" />
               </button>
             </div>
 
-            <!-- Publications dots -->
-            <div class="space-y-1">
+            <!-- Publications chips -->
+            <div class="space-y-1 overflow-hidden">
               <div
                 v-for="pub in day.pubs.slice(0, 3)"
                 :key="pub.id"
                 :class="[
-                  'text-[9px] font-bold px-1.5 py-0.5 rounded-md truncate border',
-                  pub.platform === 'INSTAGRAM' ? 'bg-pink-500/10 text-pink-600 dark:text-pink-400 border-pink-500/20' : 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/20'
+                  'flex items-center gap-1 text-[9px] font-bold px-1.5 py-1 rounded-md truncate',
+                  pub.platform === 'INSTAGRAM'
+                    ? 'bg-pink-500/10 text-pink-600 dark:text-pink-400'
+                    : 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400'
                 ]"
               >
-                {{ formatTime(pub.scheduledAt) }} · {{ pub.modelName }}
+                <Instagram v-if="pub.platform === 'INSTAGRAM'" class="w-2.5 h-2.5 shrink-0" />
+                <span v-else class="text-[7px] font-black shrink-0 leading-none">TT</span>
+                <span class="tabular-nums shrink-0">{{ formatTime(pub.scheduledAt) }}</span>
+                <span class="truncate opacity-70">{{ pub.modelName }}</span>
               </div>
               <div v-if="day.pubs.length > 3"
-                class="text-[9px] font-bold text-zinc-400 px-1.5">
+                class="text-[9px] font-bold text-zinc-400 px-1.5 pt-0.5">
                 +{{ day.pubs.length - 3 }} más
               </div>
             </div>
@@ -670,9 +690,14 @@ function platformColor(platform: SocialPlatform) {
   <Dialog v-model:open="showCreateModal">
     <DialogContent class="sm:max-w-lg">
       <DialogHeader>
-        <DialogTitle class="text-lg font-black">Nueva Publicación</DialogTitle>
+        <DialogTitle class="text-lg font-black">{{ testMode ? '⚡ Probar ahora' : 'Nueva Publicación' }}</DialogTitle>
         <DialogDescription>
-          Programá contenido para Instagram o TikTok. Las publicaciones deben estar separadas por al menos 15 minutos.
+          <template v-if="testMode">
+            Elegí modelo y perfil, subí el archivo y se publica al instante en ese perfil de AdsPower. Con dry-run activado, audita el flujo sin publicar.
+          </template>
+          <template v-else>
+            Programá contenido para Instagram o TikTok. Las publicaciones deben estar separadas por al menos 15 minutos.
+          </template>
         </DialogDescription>
       </DialogHeader>
 
@@ -739,8 +764,8 @@ function platformColor(platform: SocialPlatform) {
           </select>
         </div>
 
-        <!-- Fecha + Hora -->
-        <div class="grid grid-cols-2 gap-3">
+        <!-- Fecha + Hora (solo al programar) -->
+        <div v-if="!testMode" class="grid grid-cols-2 gap-3">
           <div class="space-y-1.5">
             <Label class="text-xs font-bold uppercase tracking-wide text-zinc-500">Fecha</Label>
             <Input type="date" v-model="form.date" class="h-10" />
@@ -749,6 +774,17 @@ function platformColor(platform: SocialPlatform) {
             <Label class="text-xs font-bold uppercase tracking-wide text-zinc-500">Hora</Label>
             <Input type="time" v-model="form.time" class="h-10" />
           </div>
+        </div>
+
+        <!-- Dry-run (solo en modo Probar ahora) -->
+        <div v-if="testMode" class="flex items-start gap-2.5 rounded-xl border border-amber-300/40 bg-amber-500/5 p-3">
+          <input id="dryRun" type="checkbox" v-model="dryRun" class="mt-0.5 h-4 w-4 accent-amber-500 cursor-pointer" />
+          <label for="dryRun" class="cursor-pointer">
+            <span class="text-sm font-bold text-amber-700 dark:text-amber-400">Dry-run (auditar sin publicar)</span>
+            <span class="block text-[11px] text-zinc-500 leading-snug mt-0.5">
+              Ejecuta todo el flujo en AdsPower (abre IG, sube el archivo, detecta el botón) pero NO clickea “Compartir”. Desactivalo para publicar de verdad.
+            </span>
+          </label>
         </div>
 
         <!-- File upload -->
@@ -843,11 +879,24 @@ function platformColor(platform: SocialPlatform) {
         <Button @click="submitCreate" :disabled="createLoading" class="gap-2">
           <Loader2 v-if="createLoading" class="w-4 h-4 animate-spin" />
           <CheckCircle2 v-else class="w-4 h-4" />
-          {{ createLoading ? 'Programando...' : 'Programar' }}
+          <template v-if="testMode">
+            {{ createLoading ? 'Ejecutando...' : (dryRun ? 'Probar (sin publicar)' : 'Publicar ahora') }}
+          </template>
+          <template v-else>
+            {{ createLoading ? 'Programando...' : 'Programar' }}
+          </template>
         </Button>
       </DialogFooter>
     </DialogContent>
   </Dialog>
+
+  <!-- Modal: propagar un contenido a varias cuentas IG -->
+  <IgScheduleModal
+    v-model:open="showIgSchedule"
+    :assignedModels="assignedModels"
+    :initialDate="igScheduleDate"
+    @scheduled="loadCalendar"
+  />
 </template>
 
 <style scoped>

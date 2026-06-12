@@ -124,6 +124,39 @@ export function usePublications() {
     }
   }
 
+  /**
+   * Publicación INMEDIATA (test). Sube el archivo + cuenta al endpoint de test,
+   * que abre el perfil de AdsPower y publica al instante. dryRun=true audita sin publicar.
+   */
+  async function publishNow(
+    payload: {
+      accountId: number
+      platform: SocialPlatform
+      contentType: ContentType
+      caption?: string
+      hashtags?: string
+      customLink?: string
+      dryRun: boolean
+    },
+    file: File
+  ): Promise<{ success: boolean; dryRun: boolean; message: string; profileId?: string }> {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('request', JSON.stringify(payload))
+
+    const res = await fetch(`${apiUrl}/automation/test/publish-now`, {
+      method: 'POST',
+      headers: authHeaders(), // sin Content-Type — boundary automático
+      body: formData,
+    })
+
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || 'Error en la publicación inmediata')
+    }
+    return data
+  }
+
   async function cancel(id: number): Promise<ScheduledPublication> {
     const res = await fetch(`${apiUrl}/automation/publications/${id}`, {
       method: 'DELETE',
@@ -137,5 +170,5 @@ export function usePublications() {
     return res.json()
   }
 
-  return { loading, getCalendar, getAccountsByModel, create, cancel }
+  return { loading, getCalendar, getAccountsByModel, create, publishNow, cancel }
 }
