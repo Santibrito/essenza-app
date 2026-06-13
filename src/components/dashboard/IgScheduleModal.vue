@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { toast } from 'vue-sonner'
-import { Loader2, Upload, X, CheckCircle2, Clock, Users, Flame, AlertTriangle, CheckCheck, Plus, Trash2, Repeat, CalendarDays, Link2, AtSign, Hash, Star, PlayCircle, BarChart3, RotateCw, Minus } from 'lucide-vue-next'
+import { Loader2, Upload, X, CheckCircle2, Clock, Users, Flame, AlertTriangle, CheckCheck, Plus, Trash2, Repeat, CalendarDays, Link2, AtSign, Hash, Star, PlayCircle, BarChart3, RotateCw, Minus, MessageCircleQuestion, Music, Search } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -18,7 +18,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ (e: 'update:open', v: boolean): void; (e: 'scheduled'): void }>()
 
-const { getAccounts, schedule } = useIgPosts()
+const { getAccounts, schedule, searchMusic } = useIgPosts()
 const { zonedToUtcISO, formatTime: tzFormatTime, tzAbbrev } = useTimezone()
 
 const today = new Date()
@@ -62,24 +62,39 @@ const saving = ref(false)
 const mediaObjUrl = ref<string | null>(null)
 const mediaIsVideo = computed(() => !!file.value && file.value.type.startsWith('video'))
 const isStory = computed(() => form.value.contentType === 'STORY')
-type Kind = 'link' | 'mention' | 'hashtag' | 'poll'
-const story = ref({
-  link: { enabled: true, url: '', text: 'HABLAME POR AQUÍ', x: 0.5, y: 0.82, scale: 1, rotation: 0 },
-  mentions: [] as { username: string; x: number; y: number; scale: number; rotation: number }[],
-  hashtags: [] as { tag: string; x: number; y: number; scale: number; rotation: number }[],
-  poll: { enabled: false, question: '¿Cuál preferís?', options: ['Opción A', 'Opción B'], x: 0.5, y: 0.45, scale: 1, rotation: 0 },
-  highlight: { add: false, title: '' },
-})
-const selSticker = ref<null | { kind: Kind; i: number }>(null)
-function resetStory() {
-  story.value = {
+type Kind = 'link' | 'mention' | 'hashtag' | 'poll' | 'question'
+function freshStory() {
+  return {
     link: { enabled: true, url: '', text: 'HABLAME POR AQUÍ', x: 0.5, y: 0.82, scale: 1, rotation: 0 },
-    mentions: [], hashtags: [],
+    mentions: [] as { username: string; x: number; y: number; scale: number; rotation: number }[],
+    hashtags: [] as { tag: string; x: number; y: number; scale: number; rotation: number }[],
     poll: { enabled: false, question: '¿Cuál preferís?', options: ['Opción A', 'Opción B'], x: 0.5, y: 0.45, scale: 1, rotation: 0 },
+    question: { enabled: false, text: 'Hazme una pregunta', x: 0.5, y: 0.6, scale: 1, rotation: 0 },
+    music: null as any,
     highlight: { add: false, title: '' },
   }
-  selSticker.value = null
 }
+const story = ref(freshStory())
+const selSticker = ref<null | { kind: Kind; i: number }>(null)
+function resetStory() { story.value = freshStory(); selSticker.value = null; musicResults.value = []; musicQuery.value = '' }
+function toggleQuestion() { story.value.question.enabled = !story.value.question.enabled; if (story.value.question.enabled) selSticker.value = { kind: 'question', i: 0 } }
+
+// Música
+const musicQuery = ref('')
+const musicResults = ref<any[]>([])
+const musicSearching = ref(false)
+async function doMusicSearch() {
+  if (!form.value.modelId || !musicQuery.value.trim()) return
+  musicSearching.value = true
+  try {
+    musicResults.value = await searchMusic(form.value.modelId, musicQuery.value.trim())
+    if (!musicResults.value.length) toast.info('Sin resultados')
+  } catch (e: any) {
+    toast.error('No se pudo buscar música', { description: e.message })
+  } finally { musicSearching.value = false }
+}
+function pickTrack(t: any) { story.value.music = t; musicResults.value = [] }
+function clearTrack() { story.value.music = null }
 function addMention() { story.value.mentions.push({ username: '', x: 0.5, y: 0.5, scale: 1, rotation: 0 }); selSticker.value = { kind: 'mention', i: story.value.mentions.length - 1 } }
 function addHashtag() { story.value.hashtags.push({ tag: '', x: 0.5, y: 0.4, scale: 1, rotation: 0 }); selSticker.value = { kind: 'hashtag', i: story.value.hashtags.length - 1 } }
 function togglePoll() { story.value.poll.enabled = !story.value.poll.enabled; if (story.value.poll.enabled) selSticker.value = { kind: 'poll', i: 0 } }
@@ -90,6 +105,7 @@ function curSticker(): any {
   if (!s) return null
   if (s.kind === 'link') return story.value.link
   if (s.kind === 'poll') return story.value.poll
+  if (s.kind === 'question') return story.value.question
   if (s.kind === 'mention') return story.value.mentions[s.i]
   return story.value.hashtags[s.i]
 }
@@ -99,6 +115,7 @@ function deleteSelected() {
   const s = selSticker.value; if (!s) return
   if (s.kind === 'link') story.value.link.enabled = false
   else if (s.kind === 'poll') story.value.poll.enabled = false
+  else if (s.kind === 'question') story.value.question.enabled = false
   else if (s.kind === 'mention') story.value.mentions.splice(s.i, 1)
   else story.value.hashtags.splice(s.i, 1)
   selSticker.value = null
@@ -121,6 +138,7 @@ function onPointerMove(e: PointerEvent) {
   const d = drag.value
   if (d.kind === 'link') { story.value.link.x = x; story.value.link.y = y }
   else if (d.kind === 'poll') { story.value.poll.x = x; story.value.poll.y = y }
+  else if (d.kind === 'question') { story.value.question.x = x; story.value.question.y = y }
   else if (d.kind === 'mention') { story.value.mentions[d.i].x = x; story.value.mentions[d.i].y = y }
   else { story.value.hashtags[d.i].x = x; story.value.hashtags[d.i].y = y }
 }
@@ -144,6 +162,11 @@ function buildStoryConfig() {
   if (P.enabled && P.question.trim() && opts.length >= 2) {
     cfg.poll = { question: P.question.trim(), options: opts, x: P.x, y: P.y, scale: P.scale, rotation: P.rotation }
   }
+  const Q = story.value.question
+  if (Q.enabled && Q.text.trim()) {
+    cfg.question = { text: Q.text.trim(), x: Q.x, y: Q.y, scale: Q.scale, rotation: Q.rotation }
+  }
+  if (story.value.music) cfg.music = story.value.music
   if (story.value.highlight.add) cfg.highlight = { add: true, title: story.value.highlight.title.trim() || 'Destacadas' }
   return Object.keys(cfg).length ? cfg : undefined
 }
@@ -259,7 +282,7 @@ const CONTENT_LABEL: Record<string, string> = { REEL: 'Reel', STORY: 'Historia',
 
 <template>
   <Dialog :open="open" @update:open="emit('update:open', $event)">
-    <DialogContent class="sm:max-w-lg">
+    <DialogContent :class="isStory ? 'sm:max-w-3xl' : 'sm:max-w-lg'">
       <DialogHeader>
         <DialogTitle class="text-lg font-black flex items-center gap-2"><Users class="w-4 h-4 text-violet-500" /> Programar publicación</DialogTitle>
         <DialogDescription>Un contenido → una o varias cuentas <b>LISTAS</b> de la modelo, con horarios desparejos para no parecer bot.</DialogDescription>
@@ -360,10 +383,10 @@ const CONTENT_LABEL: Record<string, string> = { REEL: 'Reel', STORY: 'Historia',
             <span class="text-[10px] text-zinc-400">Arrastrá los stickers · así se va a ver</span>
           </div>
 
-          <div class="flex gap-4">
+          <div class="flex gap-5">
             <!-- Lienzo 9:16 -->
             <div ref="canvasRef"
-              class="relative w-[200px] shrink-0 rounded-[1.6rem] overflow-hidden bg-black ring-4 ring-zinc-800 shadow-xl select-none"
+              class="relative w-[252px] shrink-0 rounded-[1.8rem] overflow-hidden bg-black ring-[6px] ring-zinc-900 shadow-2xl select-none"
               style="aspect-ratio: 9/16; touch-action: none;">
               <img v-if="!mediaIsVideo" :src="mediaObjUrl" class="absolute inset-0 w-full h-full object-cover" draggable="false" />
               <video v-else :src="mediaObjUrl" class="absolute inset-0 w-full h-full object-cover" muted loop autoplay playsinline></video>
@@ -388,6 +411,19 @@ const CONTENT_LABEL: Record<string, string> = { REEL: 'Reel', STORY: 'Historia',
                   <div class="flex-1 text-center text-[9px] font-black text-violet-600 py-1 border-r border-zinc-200 truncate px-1">{{ story.poll.options[0] || 'A' }}</div>
                   <div class="flex-1 text-center text-[9px] font-black text-violet-600 py-1 truncate px-1">{{ story.poll.options[1] || 'B' }}</div>
                 </div>
+              </div>
+
+              <!-- pregunta (decorativa) -->
+              <div v-if="story.question.enabled" @pointerdown="startDrag('question', 0, $event)"
+                :class="['absolute z-20 w-[58%] rounded-2xl bg-white/95 shadow-lg cursor-grab active:cursor-grabbing overflow-hidden px-2.5 py-2', isSel('question') ? 'outline outline-2 outline-violet-400' : '']"
+                :style="{ left: story.question.x * 100 + '%', top: story.question.y * 100 + '%', transform: stTransform(story.question) }">
+                <p class="text-center text-[10px] font-black text-zinc-800 truncate">{{ story.question.text || 'Hazme una pregunta' }}</p>
+                <div class="mt-1 rounded-full bg-zinc-100 text-zinc-400 text-[9px] py-1 px-2">Responder…</div>
+              </div>
+
+              <!-- indicador de música -->
+              <div v-if="story.music" class="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/55 backdrop-blur text-white text-[9px] font-bold max-w-[80%]">
+                <Music class="w-2.5 h-2.5 shrink-0" /><span class="truncate">{{ story.music.title }} · {{ story.music.artist }}</span>
               </div>
 
               <!-- menciones -->
@@ -422,6 +458,41 @@ const CONTENT_LABEL: Record<string, string> = { REEL: 'Reel', STORY: 'Historia',
                 <button type="button" @click="addHashtag" class="flex items-center gap-1 h-7 px-2.5 rounded-lg text-[11px] font-bold border border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"><Hash class="w-3 h-3" /> Hashtag</button>
                 <button type="button" @click="togglePoll"
                   :class="['flex items-center gap-1 h-7 px-2.5 rounded-lg text-[11px] font-bold border transition-all', story.poll.enabled ? 'border-violet-500 bg-violet-500/10 text-violet-600' : 'border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800']"><BarChart3 class="w-3 h-3" /> Encuesta</button>
+                <button type="button" @click="toggleQuestion"
+                  :class="['flex items-center gap-1 h-7 px-2.5 rounded-lg text-[11px] font-bold border transition-all', story.question.enabled ? 'border-violet-500 bg-violet-500/10 text-violet-600' : 'border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800']"><MessageCircleQuestion class="w-3 h-3" /> Pregunta</button>
+              </div>
+
+              <!-- pregunta -->
+              <div v-if="story.question.enabled" class="space-y-1.5 rounded-xl border border-border/50 p-2.5 bg-muted/20">
+                <Input v-model="story.question.text" placeholder="Texto de la pregunta" class="h-8 text-xs" />
+                <p class="text-[10px] text-zinc-400">Decorativa (no interactiva). Para recibir respuestas usá la encuesta.</p>
+              </div>
+
+              <!-- música -->
+              <div class="space-y-1.5 rounded-xl border border-border/50 p-2.5 bg-muted/20">
+                <Label class="text-[10px] font-black uppercase tracking-widest text-zinc-400 flex items-center gap-1.5"><Music class="w-3 h-3" /> Música</Label>
+                <div v-if="story.music" class="flex items-center gap-2 rounded-lg bg-violet-500/10 p-1.5">
+                  <img v-if="story.music.cover" :src="story.music.cover" class="w-8 h-8 rounded object-cover shrink-0" />
+                  <Music v-else class="w-4 h-4 text-violet-500 shrink-0" />
+                  <div class="min-w-0 flex-1"><p class="text-xs font-bold truncate">{{ story.music.title }}</p><p class="text-[10px] text-zinc-400 truncate">{{ story.music.artist }}</p></div>
+                  <button type="button" @click="clearTrack" class="text-zinc-400 hover:text-red-500"><X class="w-3.5 h-3.5" /></button>
+                </div>
+                <template v-else>
+                  <div class="flex items-center gap-1.5">
+                    <Input v-model="musicQuery" placeholder="Buscar canción…" class="h-8 text-xs" @keyup.enter="doMusicSearch" />
+                    <button type="button" @click="doMusicSearch" :disabled="musicSearching || !form.modelId" class="h-8 px-2.5 rounded-lg bg-violet-600 text-white flex items-center justify-center disabled:opacity-50">
+                      <Loader2 v-if="musicSearching" class="w-3.5 h-3.5 animate-spin" /><Search v-else class="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <div v-if="musicResults.length" class="max-h-32 overflow-y-auto space-y-1">
+                    <button v-for="(t, i) in musicResults" :key="i" type="button" @click="pickTrack(t)"
+                      class="w-full flex items-center gap-2 p-1.5 rounded-lg hover:bg-muted text-left">
+                      <img v-if="t.cover" :src="t.cover" class="w-8 h-8 rounded object-cover shrink-0" />
+                      <Music v-else class="w-4 h-4 text-zinc-400 shrink-0" />
+                      <div class="min-w-0 flex-1"><p class="text-xs font-bold truncate">{{ t.title }}</p><p class="text-[10px] text-zinc-400 truncate">{{ t.artist }}</p></div>
+                    </button>
+                  </div>
+                </template>
               </div>
 
               <!-- encuesta -->

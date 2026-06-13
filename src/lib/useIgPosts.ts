@@ -112,5 +112,13 @@ export function useIgPosts() {
     }
   }
 
-  return { getAccounts, schedule, getCalendar, cancel, remove, reschedule, duplicate, edit }
+  /** Busca canciones en IG (sticker de música), usando una cuenta LISTA de la modelo. */
+  async function searchMusic(modelId: number, q: string): Promise<any[]> {
+    const res = await fetch(`${apiUrl}/automation/ig-accounts/music-search?modelId=${modelId}&q=${encodeURIComponent(q)}`, { headers: headers() })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.error || 'No se pudo buscar música')
+    return data.tracks || []
+  }
+
+  return { getAccounts, schedule, getCalendar, cancel, remove, reschedule, duplicate, edit, searchMusic }
 }
