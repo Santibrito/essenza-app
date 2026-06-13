@@ -563,7 +563,7 @@ onUnmounted(() => {
           @end-shift="endShiftPrompt" @start-tour="startTourManually" />
         
         <div
-          :class="['flex-1 bg-muted/30 dark:bg-zinc-950 relative', activeTab === 'context' ? 'overflow-hidden' : 'overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-300 dark:scrollbar-thumb-zinc-700']">
+          :class="['flex-1 bg-muted/30 dark:bg-zinc-950 relative', (activeTab === 'context' || activeTab === 'publications') ? 'overflow-hidden' : 'overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-300 dark:scrollbar-thumb-zinc-700']">
           <!-- Textura de grilla sutil -->
           <svg class="absolute inset-0 w-full h-full pointer-events-none opacity-[0.03] z-0" viewBox="0 0 400 400"
             preserveAspectRatio="none">
@@ -576,7 +576,7 @@ onUnmounted(() => {
           </svg>
 
           <div
-            :class="[activeTab === 'context' ? 'max-w-none !p-0 h-full flex flex-col' : 'max-w-[1400px] p-4 lg:p-8 space-y-8 min-h-full', 'mx-auto relative z-10 transition-all']">
+            :class="[activeTab === 'context' ? 'max-w-none !p-0 h-full flex flex-col' : (activeTab === 'publications' ? 'max-w-[1600px] p-4 lg:p-6 h-full flex flex-col' : 'max-w-[1400px] p-4 lg:p-8 space-y-8 min-h-full'), 'mx-auto relative z-10 transition-all']">
             <AnnouncementsBanner />
 
             <!-- Case: TRACKER -->
@@ -679,7 +679,9 @@ onUnmounted(() => {
 
             <!-- Case: PUBLICACIONES (Marketing only) -->
             <template v-else-if="activeTab === 'publications'">
-              <PublicationsCalendar :assigned-models="assignedModels" />
+              <div class="flex-1 min-h-0">
+                <PublicationsCalendar :assigned-models="assignedModels" />
+              </div>
             </template>
 
             <!-- Case: COMPROBANTES DE PAGO -->

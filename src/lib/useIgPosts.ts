@@ -60,5 +60,40 @@ export function useIgPosts() {
     await fetch(`${apiUrl}/automation/ig-posts/${id}`, { method: 'DELETE', headers: headers() })
   }
 
-  return { getAccounts, schedule, getCalendar, cancel }
+  /** Borra el registro del calendario de forma definitiva (no toca lo ya publicado en IG). */
+  async function remove(id: number): Promise<void> {
+    const res = await fetch(`${apiUrl}/automation/ig-posts/${id}/remove`, { method: 'DELETE', headers: headers() })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.error || 'No se pudo eliminar')
+    }
+  }
+
+  /** Reprograma una publicación pendiente (drag & drop). Opcional: reasignar a otra cuenta. */
+  async function reschedule(id: number, scheduledAt: string, accountId?: number): Promise<void> {
+    const res = await fetch(`${apiUrl}/automation/ig-posts/${id}/reschedule`, {
+      method: 'PUT',
+      headers: { ...headers(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(accountId != null ? { scheduledAt, accountId } : { scheduledAt }),
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.error || 'No se pudo reprogramar')
+    }
+  }
+
+  /** Duplica una publicación (repost). Opcional: nuevo horario; si no, copia el original. */
+  async function duplicate(id: number, scheduledAt?: string): Promise<void> {
+    const res = await fetch(`${apiUrl}/automation/ig-posts/${id}/duplicate`, {
+      method: 'POST',
+      headers: { ...headers(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(scheduledAt ? { scheduledAt } : {}),
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.error || 'No se pudo duplicar')
+    }
+  }
+
+  return { getAccounts, schedule, getCalendar, cancel, remove, reschedule, duplicate }
 }

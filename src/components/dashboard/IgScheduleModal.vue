@@ -14,6 +14,7 @@ const props = defineProps<{
   open: boolean
   assignedModels?: { id: number; name: string; alias?: string }[]
   initialDate?: string
+  initialTime?: string
 }>()
 const emit = defineEmits<{ (e: 'update:open', v: boolean): void; (e: 'scheduled'): void }>()
 
@@ -52,7 +53,7 @@ watch(() => props.open, (o) => {
     const first = props.assignedModels?.[0]
     form.value = {
       modelId: first?.id ?? null, contentType: 'REEL', caption: '', hashtags: '', link: '',
-      date: props.initialDate || fmtDate(today), time: '12:00', spreadMinutes: 30,
+      date: props.initialDate || fmtDate(today), time: props.initialTime || '12:00', spreadMinutes: 30,
     }
     file.value = null; filePreview.value = null; selected.value = new Set()
     if (first?.id) loadAccounts(first.id)
