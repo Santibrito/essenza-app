@@ -130,11 +130,55 @@ export function useTimezone() {
     return `Hace ${Math.floor(hrs / 24)}d`
   }
 
+  /**
+   * Convierte una hora de pared ('YYYY-MM-DD' + 'HH:mm') interpretada en la zona
+   * del usuario (userTz) a un instante absoluto en ISO UTC (con Z).
+   * Sirve para MANDAR al backend: el server guarda el Instant sin reinterpretar zona.
+   */
+  function zonedToUtcISO(dateStr, timeStr) {
+    const [y, mo, d] = dateStr.split('-').map(Number)
+    const [h, mi] = timeStr.split(':').map(Number)
+    const asUtc = Date.UTC(y, mo - 1, d, h, mi, 0)
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: userTz.value, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+    }).formatToParts(new Date(asUtc))
+    const get = (t) => Number(parts.find((p) => p.type === t).value)
+    let hh = get('hour'); if (hh === 24) hh = 0
+    const seen = Date.UTC(get('year'), get('month') - 1, get('day'), hh, get('minute'), get('second'))
+    const offset = seen - asUtc // cuánto está adelantada userTz respecto de UTC
+    return new Date(asUtc - offset).toISOString()
+  }
+
+  /** Devuelve la clave de día 'YYYY-MM-DD' de un instante, VISTO en la zona del usuario. */
+  function dateKeyInUserTz(ts) {
+    if (!ts) return ''
+    const utcStr = ts.endsWith('Z') || ts.includes('+') ? ts : ts + 'Z'
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: userTz.value, year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(new Date(utcStr))
+    const get = (t) => parts.find((p) => p.type === t).value
+    return `${get('year')}-${get('month')}-${get('day')}`
+  }
+
+  /** Abreviatura corta de la zona del usuario (ej. "GMT-3", "ART"). */
+  function tzAbbrev() {
+    try {
+      return new Intl.DateTimeFormat('en-US', { timeZone: userTz.value, timeZoneName: 'short' })
+        .formatToParts(new Date()).find((p) => p.type === 'timeZoneName')?.value || ''
+    } catch {
+      return ''
+    }
+  }
+
   return {
     userTz,
     formatLocal,
     formatTime,
     formatRelative,
     convertShiftTime,
+    zonedToUtcISO,
+    dateKeyInUserTz,
+    tzAbbrev,
   }
 }

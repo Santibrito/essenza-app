@@ -4,6 +4,7 @@ import { toast } from 'vue-sonner'
 import {
   ChevronLeft, ChevronRight, Plus, Instagram, X,
   Calendar, Loader2, AlertTriangle, Trash2, Sparkles, ExternalLink,
+  PlayCircle, Image as ImageIcon,
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import {
@@ -12,6 +13,7 @@ import {
   STATUS_LABELS,
 } from '@/lib/usePublications'
 import { useIgPosts } from '@/lib/useIgPosts'
+import { useTimezone } from '@/lib/useTimezone'
 import IgScheduleModal from '@/components/dashboard/IgScheduleModal.vue'
 
 // ── Props ─────────────────────────────────────────────────────────────────────
@@ -21,6 +23,9 @@ const props = defineProps<{
 
 const { getCalendar: getOldCalendar, cancel: cancelOld } = usePublications()
 const { getCalendar: igGetCalendar, cancel: cancelIg } = useIgPosts()
+const { formatTime: tzFormatTime, dateKeyInUserTz, tzAbbrev } = useTimezone()
+
+const pad2 = (n: number) => String(n).padStart(2, '0')
 
 // ── Item normalizado para el calendario (mezcla legacy + cuentas IG nuevas) ────
 interface CalItem {
@@ -36,6 +41,7 @@ interface CalItem {
   errorMessage?: string
   photoUrl?: string
   postUrl?: string
+  mediaUrl?: string
 }
 
 // ── Modal de programación (cuentas IG nuevas) ──────────────────────────────────
@@ -73,11 +79,9 @@ const calendarDays = computed(() => {
 
   for (let d = 1; d <= daysInMonth; d++) {
     const date = new Date(year, month - 1, d)
+    const key = `${year}-${pad2(month)}-${pad2(d)}`
     const dayItems = items.value
-      .filter(p => {
-        const pd = new Date(p.scheduledAt)
-        return pd.getFullYear() === year && pd.getMonth() + 1 === month && pd.getDate() === d
-      })
+      .filter(p => dateKeyInUserTz(p.scheduledAt) === key)
       .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime())
     days.push({ date, items: dayItems })
   }
@@ -127,6 +131,7 @@ async function loadCalendar() {
       errorMessage: p.errorMessage,
       photoUrl: p.profilePhotoUrl,
       postUrl: p.postUrl,
+      mediaUrl: p.mediaUrl,
     }))
     const legacy: CalItem[] = (oldPubs || []).map((p: any) => ({
       key: 'old' + p.id,
@@ -160,9 +165,10 @@ function selectDay(day: { date: Date | null; items: CalItem[] }) {
 function syncSelectedDay() {
   if (!selectedDay.value) return
   const d = selectedDay.value.date
+  const dk = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
   selectedDay.value = {
     date: d,
-    items: items.value.filter(p => new Date(p.scheduledAt).toDateString() === d.toDateString())
+    items: items.value.filter(p => dateKeyInUserTz(p.scheduledAt) === dk)
       .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime()),
   }
 }
@@ -189,8 +195,9 @@ async function onScheduled() {
 function formatDateInput(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
 }
+// La hora se muestra en la ZONA DEL USUARIO (auth.user.timezone), no hardcodeada.
 function formatTime(iso: string) {
-  return new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
+  return tzFormatTime(iso)
 }
 function contentLabel(ct: string) {
   return (CONTENT_TYPE_LABELS as any)[ct] || ct
@@ -215,6 +222,7 @@ const CHIP: Record<string, string> = {
   CANCELLED:  'bg-zinc-400/10 text-zinc-500 line-through',
 }
 function chip(s: string) { return CHIP[s] || 'bg-zinc-400/10 text-zinc-500' }
+function isImage(url?: string) { return !!url && /\.(jpg|jpeg|png|webp|gif|avif)(\?|$)/i.test(url) }
 </script>
 
 <template>
@@ -346,7 +354,7 @@ function chip(s: string) { return CHIP[s] || 'bg-zinc-400/10 text-zinc-500' }
               {{ selectedDay.date.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' }) }}
             </p>
             <p class="text-[10px] text-zinc-400 font-bold uppercase tracking-widest mt-0.5">
-              {{ selectedDay.items.length }} publicación{{ selectedDay.items.length !== 1 ? 'es' : '' }}
+              {{ selectedDay.items.length }} publicación{{ selectedDay.items.length !== 1 ? 'es' : '' }} · horario {{ tzAbbrev() }}
             </p>
           </div>
           <div class="flex items-center gap-1">
@@ -377,21 +385,38 @@ function chip(s: string) { return CHIP[s] || 'bg-zinc-400/10 text-zinc-500' }
             :key="it.key"
             class="rounded-xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50 p-3 space-y-2"
           >
-            <!-- Header: avatar + time + status -->
-            <div class="flex items-center justify-between gap-2">
-              <div class="flex items-center gap-2 min-w-0">
-                <div class="w-7 h-7 rounded-full bg-gradient-to-br from-pink-500/20 to-violet-500/20 overflow-hidden shrink-0 flex items-center justify-center">
-                  <img v-if="it.photoUrl" :src="it.photoUrl" class="w-full h-full object-cover" />
-                  <Instagram v-else class="w-3.5 h-3.5 text-pink-500" />
+            <!-- Top: miniatura del contenido + cuenta + hora + estado -->
+            <div class="flex items-start gap-2.5">
+              <!-- Miniatura -->
+              <div class="w-12 h-12 rounded-lg bg-zinc-200 dark:bg-zinc-700 overflow-hidden shrink-0 flex items-center justify-center relative">
+                <img v-if="isImage(it.mediaUrl)" :src="it.mediaUrl" class="w-full h-full object-cover" />
+                <template v-else-if="it.mediaUrl">
+                  <video :src="it.mediaUrl" class="w-full h-full object-cover" muted preload="metadata" />
+                  <PlayCircle class="w-4 h-4 text-white/90 absolute drop-shadow" />
+                </template>
+                <ImageIcon v-else class="w-4 h-4 text-zinc-400" />
+              </div>
+
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center justify-between gap-2">
+                  <div class="flex items-center gap-1.5 min-w-0">
+                    <div class="w-4 h-4 rounded-full overflow-hidden shrink-0 bg-pink-500/15 flex items-center justify-center">
+                      <img v-if="it.photoUrl" :src="it.photoUrl" class="w-full h-full object-cover" />
+                      <Instagram v-else class="w-2.5 h-2.5 text-pink-500" />
+                    </div>
+                    <p class="text-xs font-black text-zinc-800 dark:text-zinc-200 truncate leading-none">{{ it.title }}</p>
+                  </div>
+                  <span :class="['text-[9px] font-black px-1.5 py-0.5 rounded-md shrink-0 flex items-center gap-1', chip(it.status)]">
+                    <span :class="['w-1.5 h-1.5 rounded-full', dot(it.status)]"></span>{{ statusLabel(it.status) }}
+                  </span>
                 </div>
-                <div class="min-w-0">
-                  <p class="text-xs font-black text-zinc-800 dark:text-zinc-200 truncate leading-none">{{ it.title }}</p>
-                  <p class="text-[10px] text-zinc-400 font-medium tabular-nums mt-0.5">{{ formatTime(it.scheduledAt) }} · {{ contentLabel(it.contentType) }}</p>
+                <!-- Hora destacada -->
+                <div class="flex items-center gap-1.5 mt-1.5">
+                  <span class="text-sm font-black tabular-nums text-zinc-900 dark:text-zinc-100 leading-none">{{ formatTime(it.scheduledAt) }}</span>
+                  <span class="text-[8px] font-black uppercase tracking-wider text-zinc-400 bg-zinc-200 dark:bg-zinc-700 px-1 py-0.5 rounded">{{ tzAbbrev() }}</span>
+                  <span class="text-[10px] text-zinc-400 font-semibold">· {{ contentLabel(it.contentType) }}</span>
                 </div>
               </div>
-              <span :class="['text-[9px] font-black px-1.5 py-0.5 rounded-md shrink-0 flex items-center gap-1', chip(it.status)]">
-                <span :class="['w-1.5 h-1.5 rounded-full', dot(it.status)]"></span>{{ statusLabel(it.status) }}
-              </span>
             </div>
 
             <!-- Caption -->

@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { useIgPosts, type IgAccountLite } from '@/lib/useIgPosts'
+import { useTimezone } from '@/lib/useTimezone'
 
 const props = defineProps<{
   open: boolean
@@ -17,6 +18,7 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: 'update:open', v: boolean): void; (e: 'scheduled'): void }>()
 
 const { getAccounts, schedule } = useIgPosts()
+const { zonedToUtcISO, formatTime: tzFormatTime, tzAbbrev } = useTimezone()
 
 const today = new Date()
 function fmtDate(d: Date) {
@@ -107,11 +109,12 @@ async function submit() {
       caption: form.value.caption || undefined,
       hashtags: form.value.hashtags || undefined,
       link: form.value.link || undefined,
-      scheduledAt: `${form.value.date}T${form.value.time}:00`,
+      // Convertimos la hora (en la zona del usuario) a un instante UTC absoluto.
+      scheduledAt: zonedToUtcISO(form.value.date, form.value.time),
       spreadMinutes: form.value.spreadMinutes,
     }, file.value)
     toast.success(`Programado en ${res.count} cuenta${res.count !== 1 ? 's' : ''} 🎉`, {
-      description: `Se subirá entre las ${res.from} y las ${res.to}` + (res.skipped ? ` · ${res.skipped} salteada(s) por no estar lista(s)` : ''),
+      description: `Se subirá entre las ${tzFormatTime(res.from)} y las ${tzFormatTime(res.to)} (${tzAbbrev()})` + (res.skipped ? ` · ${res.skipped} salteada(s) por no estar lista(s)` : ''),
       duration: 8000,
     })
     emit('scheduled')
@@ -245,7 +248,7 @@ const CONTENT_LABEL: Record<string, string> = { REEL: 'Reel', STORY: 'Historia',
             <Input type="date" v-model="form.date" class="h-10" />
           </div>
           <div class="space-y-1.5">
-            <Label class="text-xs font-bold uppercase tracking-wide text-zinc-500">Hora base</Label>
+            <Label class="text-xs font-bold uppercase tracking-wide text-zinc-500">Hora base ({{ tzAbbrev() }})</Label>
             <Input type="time" v-model="form.time" class="h-10" />
           </div>
           <div class="space-y-1.5">
@@ -258,7 +261,7 @@ const CONTENT_LABEL: Record<string, string> = { REEL: 'Reel', STORY: 'Historia',
         <div class="flex items-center gap-2 rounded-xl bg-violet-500/5 border border-violet-500/20 p-3 text-sm">
           <Clock class="w-4 h-4 text-violet-500 shrink-0" />
           <span class="text-zinc-700 dark:text-zinc-300">
-            {{ CONTENT_LABEL[form.contentType] }} · se subirá <b>{{ windowText }}</b> en <b>{{ selected.size }}</b> cuenta{{ selected.size !== 1 ? 's' : '' }}
+            {{ CONTENT_LABEL[form.contentType] }} · se subirá <b>{{ windowText }}</b> <b>(hora {{ tzAbbrev() }})</b> en <b>{{ selected.size }}</b> cuenta{{ selected.size !== 1 ? 's' : '' }}
           </span>
         </div>
       </div>
