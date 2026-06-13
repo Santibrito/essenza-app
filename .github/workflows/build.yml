@@ -11,13 +11,36 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    runs-on: ${{ matrix.os }}
+  # 1) Crea el release en BORRADOR una sola vez (evita el 422 already_exists por la carrera
+  #    entre los jobs de Windows y macOS, y que los usuarios vean un release a medio subir).
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      tag: v${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: ver
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Ensure draft release exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="v${{ steps.ver.outputs.version }}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $tag ya existe — se reutiliza."
+          else
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --title "$tag" --notes "Release $tag" --draft
+          fi
 
+  # 2) Buildea cada SO y sube sus binarios al borrador (electron-builder reutiliza el draft).
+  release:
+    needs: create-release
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [windows-latest, macos-latest]
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -37,3 +60,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run dist
+
+  # 3) Cuando ambos SO terminaron OK, publica el release (saca el borrador) para que el
+  #    auto-updater se lo entregue a los usuarios con TODOS los binarios ya disponibles.
+  publish-release:
+    needs: [create-release, release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish (undraft) release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${{ needs.create-release.outputs.tag }}" --repo "$GITHUB_REPOSITORY" --draft=false

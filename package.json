@@ -1,6 +1,6 @@
 {
   "name": "essenzamodels",
-  "version": "1.0.31",
+  "version": "1.0.32",
   "author": "sb",
   "type": "module",
   "description": "Corporate Communication Platform",
@@ -81,7 +81,7 @@
       "provider": "github",
       "owner": "Santibrito",
       "repo": "essenza-app",
-      "releaseType": "release"
+      "releaseType": "draft"
     },
     "win": {
       "target": [
