@@ -6,6 +6,7 @@ import {
   Calendar, Loader2, AlertTriangle, Trash2, Sparkles, ExternalLink,
   PlayCircle, LayoutGrid, Columns3, List as ListIcon,
   Search, RefreshCw, Film, Camera, Ban, Users, GripVertical, Copy,
+  Pencil, CheckCheck, X, CheckSquare,
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import {
@@ -19,6 +20,7 @@ import {
 import { useIgPosts } from '@/lib/useIgPosts'
 import { useTimezone } from '@/lib/useTimezone'
 import IgScheduleModal from '@/components/dashboard/IgScheduleModal.vue'
+import IgPostEditModal from '@/components/dashboard/IgPostEditModal.vue'
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 const props = defineProps<{
@@ -402,6 +404,82 @@ async function duplicateItem(it: CalItem) {
   }
 }
 
+// ── Editar ───────────────────────────────────────────────────────────────────
+const showEdit = ref(false)
+const editPost = ref<CalItem | null>(null)
+function openEdit(it: CalItem) {
+  if (!it.isIg) { toast.error('Solo se editan las publicaciones de cuentas IG'); return }
+  if (it.status !== 'PENDING') { toast.error('Solo se editan las pendientes'); return }
+  editPost.value = it
+  showEdit.value = true
+}
+async function onEdited() { await loadCalendar() }
+
+// ── Vista previa al pasar el mouse ─────────────────────────────────────────────
+const hover = ref<{ it: CalItem; x: number; y: number } | null>(null)
+let hoverTimer: any = null
+function onHover(it: CalItem, e: MouseEvent) {
+  clearTimeout(hoverTimer)
+  hoverTimer = setTimeout(() => {
+    hover.value = { it, x: Math.min(e.clientX + 16, window.innerWidth - 280), y: Math.min(e.clientY + 12, window.innerHeight - 240) }
+  }, 320)
+}
+function offHover() { clearTimeout(hoverTimer); hover.value = null }
+
+// ── Selección múltiple (bulk) ──────────────────────────────────────────────────
+const selectMode = ref(false)
+const selected = ref<Set<string>>(new Set())
+const bulkBusy = ref(false)
+function toggleSelectMode() { selectMode.value = !selectMode.value; if (!selectMode.value) selected.value = new Set() }
+function toggleSelect(it: CalItem) {
+  if (selected.value.has(it.key)) selected.value.delete(it.key)
+  else selected.value.add(it.key)
+  selected.value = new Set(selected.value)
+}
+const selectedItems = computed(() => filteredItems.value.filter(i => selected.value.has(i.key)))
+function clearSelection() { selected.value = new Set() }
+
+async function bulkDelete() {
+  const its = selectedItems.value.filter(i => i.status !== 'PROCESSING')
+  if (!its.length) return
+  bulkBusy.value = true
+  let ok = 0
+  try {
+    for (const it of its) {
+      try { if (it.isIg) await igRemove(it.rawId); else await cancelOld(it.rawId); ok++ } catch { /* sigue */ }
+    }
+    toast.success(`${ok} publicación(es) eliminada(s)`)
+    clearSelection(); selectMode.value = false
+    await loadCalendar()
+  } finally { bulkBusy.value = false }
+}
+async function bulkCancel() {
+  const its = selectedItems.value.filter(i => i.status === 'PENDING')
+  if (!its.length) { toast.error('Ninguna seleccionada está pendiente'); return }
+  bulkBusy.value = true
+  let ok = 0
+  try {
+    for (const it of its) {
+      try { if (it.isIg) await cancelIg(it.rawId); else await cancelOld(it.rawId); ok++ } catch { /* sigue */ }
+    }
+    toast.success(`${ok} cancelada(s)`)
+    clearSelection(); selectMode.value = false
+    await loadCalendar()
+  } finally { bulkBusy.value = false }
+}
+async function bulkDuplicate() {
+  const its = selectedItems.value.filter(i => i.isIg)
+  if (!its.length) return
+  bulkBusy.value = true
+  let ok = 0
+  try {
+    for (const it of its) { try { await igDuplicate(it.rawId); ok++ } catch { /* sigue */ } }
+    toast.success(`${ok} duplicada(s)`)
+    clearSelection(); selectMode.value = false
+    await loadCalendar()
+  } finally { bulkBusy.value = false }
+}
+
 // ── Vista por cuentas (swimlanes) ──────────────────────────────────────────────
 const swimAccounts = ref<any[]>([])
 const loadingSwim = ref(false)
@@ -527,10 +605,13 @@ const CONTENT_FILTERS = [
   <div class="h-full flex flex-col min-h-0">
 
     <!-- ══ TOOLBAR ══════════════════════════════════════════════════════════ -->
-    <div class="shrink-0 space-y-3 mb-3">
+    <div class="shrink-0 mb-3 rounded-2xl border border-zinc-100 dark:border-zinc-800/60 bg-white/70 dark:bg-zinc-900/50 backdrop-blur-sm p-3 space-y-3 shadow-sm">
       <!-- Fila 1: título + navegación + vista + acción -->
       <div class="flex items-center justify-between gap-3 flex-wrap">
         <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-600 to-fuchsia-600 flex items-center justify-center text-white shadow-md shadow-violet-500/20 shrink-0">
+            <Calendar class="w-5 h-5" />
+          </div>
           <div class="min-w-[150px]">
             <h2 class="text-xl font-black text-zinc-900 dark:text-zinc-50 tracking-tight leading-none capitalize">
               {{ periodLabel }}
@@ -564,7 +645,12 @@ const CONTENT_FILTERS = [
               <component :is="v.icon" class="w-3.5 h-3.5" />{{ v.label }}
             </button>
           </div>
-          <Button @click="openSchedule()" class="gap-2 h-9 shadow-sm bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white border-0 hover:from-violet-700 hover:to-fuchsia-700">
+          <button @click="toggleSelectMode" v-if="view === 'list'"
+            :class="['h-9 px-3 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all',
+                     selectMode ? 'border-violet-500 bg-violet-500/10 text-violet-600 dark:text-violet-400' : 'border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800']">
+            <CheckSquare class="w-3.5 h-3.5" />{{ selectMode ? 'Listo' : 'Seleccionar' }}
+          </button>
+          <Button @click="openSchedule()" class="gap-2 h-9 shadow-md shadow-violet-500/20 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white border-0 hover:from-violet-700 hover:to-fuchsia-700 hover:shadow-lg hover:shadow-violet-500/30 transition-all">
             <Sparkles class="w-4 h-4" /><span class="text-sm font-semibold">Programar</span>
           </Button>
         </div>
@@ -651,13 +737,18 @@ const CONTENT_FILTERS = [
                 <div v-for="it in itemsForDay(cell.date).slice(0, 3)" :key="it.key"
                   :draggable="canDrag(it)"
                   @dragstart="onDragStart(it, $event)" @dragend="onDragEnd"
-                  :class="['relative flex items-center gap-1 pl-2 pr-1.5 py-1 rounded-md overflow-hidden', chip(it.status),
+                  @mouseenter="onHover(it, $event)" @mouseleave="offHover"
+                  :class="['relative flex items-center gap-1.5 pl-2 pr-1.5 py-1 rounded-lg overflow-hidden hover:brightness-105', chip(it.status),
                            canDrag(it) ? 'cursor-grab active:cursor-grabbing' : '',
                            dragKey === it.key ? 'opacity-40' : '']">
                   <span :class="['absolute left-0 top-0 bottom-0 w-1', accountColor(it)]"></span>
-                  <div class="w-4 h-4 rounded-full overflow-hidden shrink-0 bg-zinc-200 dark:bg-zinc-700 flex items-center justify-center">
-                    <img v-if="it.photoUrl" :src="it.photoUrl" class="w-full h-full object-cover" />
-                    <Instagram v-else class="w-2 h-2 text-pink-500" />
+                  <div class="w-5 h-5 rounded-md overflow-hidden shrink-0 bg-zinc-200 dark:bg-zinc-700 flex items-center justify-center relative">
+                    <img v-if="isImage(it.mediaUrl)" :src="it.mediaUrl" class="w-full h-full object-cover" />
+                    <template v-else-if="it.mediaUrl">
+                      <video :src="it.mediaUrl" class="w-full h-full object-cover" muted preload="metadata" />
+                      <PlayCircle class="w-2.5 h-2.5 text-white/90 absolute drop-shadow" />
+                    </template>
+                    <component v-else :is="typeMeta(it.contentType).icon" class="w-2.5 h-2.5 text-zinc-400" />
                   </div>
                   <span class="text-[9px] font-black tabular-nums shrink-0">{{ formatTime(it.scheduledAt) }}</span>
                   <span class="text-[9px] font-bold truncate opacity-80">{{ it.title }}</span>
@@ -717,6 +808,7 @@ const CONTENT_FILTERS = [
               <div v-for="it in itemsForDay(d)" :key="it.key"
                 :draggable="canDrag(it)" @dragstart="onDragStart(it, $event)" @dragend="onDragEnd"
                 @click.stop="openDay(d)"
+                @mouseenter="onHover(it, $event)" @mouseleave="offHover"
                 :style="{ top: topForItem(it) + 'px' }"
                 :class="['absolute left-0.5 right-0.5 z-10 rounded-md overflow-hidden border shadow-sm hover:z-40 hover:shadow-md transition-shadow',
                          chip(it.status), 'border-black/5 dark:border-white/5',
@@ -820,8 +912,17 @@ const CONTENT_FILTERS = [
           </div>
           <div class="space-y-1.5 pl-1">
             <div v-for="it in g.items" :key="it.key"
-              class="relative flex items-center gap-3 rounded-xl border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900/40 p-2.5 pl-3.5 overflow-hidden hover:shadow-sm transition-all">
+              @mouseenter="onHover(it, $event)" @mouseleave="offHover"
+              @click="selectMode && it.isIg ? toggleSelect(it) : null"
+              :class="['relative flex items-center gap-3 rounded-xl border bg-white dark:bg-zinc-900/40 p-2.5 pl-3.5 overflow-hidden transition-all',
+                       selected.has(it.key) ? 'border-violet-500 ring-1 ring-violet-500/30 bg-violet-500/[0.04]' : 'border-zinc-100 dark:border-zinc-800 hover:shadow-md hover:-translate-y-px',
+                       selectMode && it.isIg ? 'cursor-pointer' : '']">
               <span :class="['absolute left-0 top-0 bottom-0 w-1.5', accountColor(it)]"></span>
+              <button v-if="selectMode && it.isIg" @click.stop="toggleSelect(it)"
+                :class="['w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-all',
+                         selected.has(it.key) ? 'bg-violet-600 border-violet-600 text-white' : 'border-zinc-300 dark:border-zinc-600']">
+                <CheckCheck v-if="selected.has(it.key)" class="w-3 h-3" />
+              </button>
               <span class="text-sm font-black tabular-nums text-zinc-700 dark:text-zinc-300 w-12 shrink-0">{{ formatTime(it.scheduledAt) }}</span>
               <div class="w-11 h-11 rounded-lg overflow-hidden shrink-0 bg-zinc-200 dark:bg-zinc-700 flex items-center justify-center relative">
                 <img v-if="isImage(it.mediaUrl)" :src="it.mediaUrl" class="w-full h-full object-cover" />
@@ -848,7 +949,11 @@ const CONTENT_FILTERS = [
               </span>
               <div class="flex items-center gap-1 shrink-0">
                 <a v-if="it.postUrl" :href="it.postUrl" target="_blank" class="w-7 h-7 rounded-lg flex items-center justify-center text-violet-500 hover:bg-violet-500/10 transition-colors" title="Ver publicación"><ExternalLink class="w-3.5 h-3.5" /></a>
-                <button v-if="it.isIg" @click="duplicateItem(it)"
+                <button v-if="it.isIg && it.status === 'PENDING'" @click.stop="openEdit(it)"
+                  class="w-7 h-7 rounded-lg flex items-center justify-center text-zinc-400 hover:text-sky-500 hover:bg-sky-500/10 transition-colors" title="Editar">
+                  <Pencil class="w-3.5 h-3.5" />
+                </button>
+                <button v-if="it.isIg" @click.stop="duplicateItem(it)"
                   class="w-7 h-7 rounded-lg flex items-center justify-center text-zinc-400 hover:text-violet-500 hover:bg-violet-500/10 transition-colors" title="Duplicar">
                   <Copy class="w-3.5 h-3.5" />
                 </button>
@@ -937,6 +1042,10 @@ const CONTENT_FILTERS = [
 
           <!-- Acciones -->
           <div class="flex items-center gap-2 pt-1">
+            <button v-if="it.isIg && it.status === 'PENDING'" @click="openEdit(it)"
+              class="flex items-center justify-center gap-1.5 text-[11px] font-bold text-sky-600 hover:bg-sky-50 dark:hover:bg-sky-500/10 rounded-lg py-1.5 px-2.5 transition-colors">
+              <Pencil class="w-3 h-3" /> Editar
+            </button>
             <button v-if="it.status === 'PENDING'" @click="cancelItem(it)"
               class="flex items-center justify-center gap-1.5 text-[11px] font-bold text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-500/10 rounded-lg py-1.5 px-2.5 transition-colors">
               <Ban class="w-3 h-3" /> Cancelar
@@ -960,6 +1069,57 @@ const CONTENT_FILTERS = [
     </DialogContent>
   </Dialog>
 
+  <!-- ══ BARRA DE ACCIONES MASIVAS ════════════════════════════════════════ -->
+  <Transition name="bulkbar">
+    <div v-if="selectMode && selected.size"
+      class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-3 py-2 rounded-2xl bg-zinc-900 dark:bg-zinc-800 text-white shadow-2xl shadow-black/30 ring-1 ring-white/10">
+      <span class="text-xs font-black px-2 tabular-nums">{{ selected.size }} seleccionada{{ selected.size !== 1 ? 's' : '' }}</span>
+      <div class="w-px h-5 bg-white/15"></div>
+      <button @click="bulkDuplicate" :disabled="bulkBusy" class="flex items-center gap-1.5 text-xs font-bold px-2.5 py-1.5 rounded-lg hover:bg-white/10 transition-colors disabled:opacity-50">
+        <Copy class="w-3.5 h-3.5" /> Duplicar
+      </button>
+      <button @click="bulkCancel" :disabled="bulkBusy" class="flex items-center gap-1.5 text-xs font-bold px-2.5 py-1.5 rounded-lg hover:bg-white/10 transition-colors disabled:opacity-50">
+        <Ban class="w-3.5 h-3.5" /> Cancelar
+      </button>
+      <button @click="bulkDelete" :disabled="bulkBusy" class="flex items-center gap-1.5 text-xs font-bold px-2.5 py-1.5 rounded-lg bg-red-500/90 hover:bg-red-500 transition-colors disabled:opacity-50">
+        <Loader2 v-if="bulkBusy" class="w-3.5 h-3.5 animate-spin" /><Trash2 v-else class="w-3.5 h-3.5" /> Eliminar
+      </button>
+      <button @click="clearSelection" class="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-white/10 transition-colors"><X class="w-3.5 h-3.5" /></button>
+    </div>
+  </Transition>
+
+  <!-- ══ VISTA PREVIA AL PASAR EL MOUSE ═══════════════════════════════════ -->
+  <Teleport to="body">
+    <Transition name="preview">
+      <div v-if="hover" class="fixed z-[60] w-64 rounded-2xl bg-white dark:bg-zinc-900 shadow-2xl shadow-black/30 ring-1 ring-black/5 dark:ring-white/10 overflow-hidden pointer-events-none"
+        :style="{ left: hover.x + 'px', top: hover.y + 'px' }">
+        <div class="aspect-square bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center relative">
+          <img v-if="isImage(hover.it.mediaUrl)" :src="hover.it.mediaUrl" class="w-full h-full object-cover" />
+          <template v-else-if="hover.it.mediaUrl">
+            <video :src="hover.it.mediaUrl" class="w-full h-full object-cover" muted preload="metadata" />
+            <PlayCircle class="w-10 h-10 text-white/90 absolute drop-shadow" />
+          </template>
+          <component v-else :is="typeMeta(hover.it.contentType).icon" class="w-10 h-10 text-zinc-300" />
+          <span :class="['absolute top-2 left-2 text-[9px] font-black uppercase px-2 py-0.5 rounded-full backdrop-blur', typeMeta(hover.it.contentType).soft, typeMeta(hover.it.contentType).text]">{{ contentLabel(hover.it.contentType) }}</span>
+        </div>
+        <div class="p-3 space-y-1.5">
+          <div class="flex items-center gap-1.5">
+            <div class="w-5 h-5 rounded-full overflow-hidden shrink-0 bg-pink-500/15 flex items-center justify-center">
+              <img v-if="hover.it.photoUrl" :src="hover.it.photoUrl" class="w-full h-full object-cover" />
+              <Instagram v-else class="w-3 h-3 text-pink-500" />
+            </div>
+            <p class="text-xs font-black truncate text-zinc-800 dark:text-zinc-200">{{ hover.it.title }}</p>
+            <span :class="['ml-auto text-[9px] font-black px-1.5 py-0.5 rounded flex items-center gap-1', chip(hover.it.status)]">
+              <span :class="['w-1.5 h-1.5 rounded-full', dot(hover.it.status)]"></span>{{ statusLabel(hover.it.status) }}
+            </span>
+          </div>
+          <p class="text-[11px] font-bold text-zinc-500 tabular-nums">{{ formatTime(hover.it.scheduledAt) }} {{ tzAbbrev() }}</p>
+          <p v-if="hover.it.caption" class="text-[11px] text-zinc-500 line-clamp-3 leading-relaxed">{{ hover.it.caption }}</p>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
+
   <!-- Modal: programar -->
   <IgScheduleModal
     v-model:open="showSchedule"
@@ -968,10 +1128,19 @@ const CONTENT_FILTERS = [
     :initialTime="scheduleTime"
     @scheduled="onScheduled"
   />
+
+  <!-- Modal: editar -->
+  <IgPostEditModal v-model:open="showEdit" :post="editPost" @saved="onEdited" />
 </template>
 
 <style scoped>
 .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
 .scrollbar-thin::-webkit-scrollbar-thumb { background: rgba(120,120,130,0.3); border-radius: 9999px; }
 .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+
+.bulkbar-enter-active, .bulkbar-leave-active { transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1); }
+.bulkbar-enter-from, .bulkbar-leave-to { opacity: 0; transform: translate(-50%, 16px); }
+
+.preview-enter-active, .preview-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
+.preview-enter-from, .preview-leave-to { opacity: 0; transform: scale(0.96); }
 </style>

@@ -40,6 +40,7 @@ export function useIgPosts() {
     link?: string
     scheduledAt: string
     spreadMinutes: number
+    storyConfig?: any
   }, file: File): Promise<IgScheduleResult> {
     const fd = new FormData()
     fd.append('media', file)
@@ -82,6 +83,22 @@ export function useIgPosts() {
     }
   }
 
+  /** Edita una publicación pendiente (descripción, hashtags, link, tipo, horario, cuenta). */
+  async function edit(id: number, payload: {
+    caption?: string; hashtags?: string; link?: string; contentType?: string
+    scheduledAt?: string; accountId?: number
+  }): Promise<void> {
+    const res = await fetch(`${apiUrl}/automation/ig-posts/${id}`, {
+      method: 'PUT',
+      headers: { ...headers(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.error || 'No se pudo guardar')
+    }
+  }
+
   /** Duplica una publicación (repost). Opcional: nuevo horario; si no, copia el original. */
   async function duplicate(id: number, scheduledAt?: string): Promise<void> {
     const res = await fetch(`${apiUrl}/automation/ig-posts/${id}/duplicate`, {
@@ -95,5 +112,5 @@ export function useIgPosts() {
     }
   }
 
-  return { getAccounts, schedule, getCalendar, cancel, remove, reschedule, duplicate }
+  return { getAccounts, schedule, getCalendar, cancel, remove, reschedule, duplicate, edit }
 }
