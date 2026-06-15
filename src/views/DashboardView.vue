@@ -39,6 +39,7 @@ const CreateCustomModal = defineAsyncComponent(() => import('@/components/custom
 const ContentManagerKanban = defineAsyncComponent(() => import('@/components/customs/ContentManagerKanban.vue'))
 const PublicationsCalendar = defineAsyncComponent(() => import('@/components/dashboard/PublicationsCalendar.vue'))
 const PaymentReceiptsSection = defineAsyncComponent(() => import('@/components/dashboard/PaymentReceiptsSection.vue'))
+const AccountsPanel = defineAsyncComponent(() => import('@/components/dashboard/AccountsPanel.vue'))
 import { useCustomsNotifications } from '@/lib/useCustomsNotifications'
 import { postWithOutbox, flushOutbox } from '@/lib/outbox'
 
@@ -104,7 +105,7 @@ const {
 const userOffDays = ref('')
 const shiftTarget = ref<number>(0)
 const modelsHistory = ref<Record<number, HistoryEntry[]>>({})
-const activeTab = ref<'tracker' | 'history' | 'crm' | 'creative' | 'context' | 'customs' | 'publications' | 'marketing' | 'receipts'>('tracker')
+const activeTab = ref<'tracker' | 'history' | 'crm' | 'creative' | 'context' | 'customs' | 'publications' | 'marketing' | 'receipts' | 'accounts'>('tracker')
 const showCreateCustom = ref(false)
 const customsNotifications = useCustomsNotifications(() => assignedModels.value.map((m: any) => m.id))
 const sidebarOpen = ref(false)
@@ -687,6 +688,11 @@ onUnmounted(() => {
             <!-- Case: COMPROBANTES DE PAGO -->
             <template v-else-if="activeTab === 'receipts'">
               <PaymentReceiptsSection />
+            </template>
+
+            <!-- Case: CUENTAS (Marketing only) — gestión completa de cuentas IG + 2FA -->
+            <template v-else-if="activeTab === 'accounts'">
+              <AccountsPanel />
             </template>
 
           </div>
