@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { toast } from 'vue-sonner'
-import { Loader2, Upload, X, CheckCircle2, Clock, Users, Flame, AlertTriangle, CheckCheck, Plus, Trash2, Repeat, CalendarDays, Link2, AtSign, Hash, Star, PlayCircle, BarChart3, RotateCw, Minus, MessageCircleQuestion, Music, Search } from 'lucide-vue-next'
+import { Loader2, Upload, X, CheckCircle2, Clock, Users, Flame, AlertTriangle, CheckCheck, Plus, Trash2, Repeat, CalendarDays, Link2, AtSign, Hash, Star, PlayCircle, BarChart3, RotateCw, Minus, MessageCircleQuestion, Music, Search, Sparkles } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -19,7 +19,7 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: 'update:open', v: boolean): void; (e: 'scheduled'): void }>()
 
 const { getAccounts, schedule, searchMusic } = useIgPosts()
-const { zonedToUtcISO, formatTime: tzFormatTime, tzAbbrev } = useTimezone()
+const { zonedToUtcISO, madridTimeToUserTime, formatTime: tzFormatTime, tzAbbrev } = useTimezone()
 
 const today = new Date()
 function fmtDate(d: Date) {
@@ -38,8 +38,8 @@ const form = ref({
   spreadMinutes: 30,
 })
 
-function addTime() { form.value.times.push('18:00') }
-function removeTime(i: number) { if (form.value.times.length > 1) form.value.times.splice(i, 1) }
+function addTime() { form.value.times.push('18:00'); activeStrategy.value = null }
+function removeTime(i: number) { if (form.value.times.length > 1) { form.value.times.splice(i, 1); activeStrategy.value = null } }
 function addDays(dateStr: string, n: number) {
   const [y, mo, d] = dateStr.split('-').map(Number)
   const dt = new Date(y, mo - 1, d); dt.setDate(dt.getDate() + n)
@@ -51,6 +51,38 @@ const REPEAT_OPTS = [
   { v: 14, label: '14 días' },
   { v: 30, label: '30 días' },
 ]
+
+// ── Estrategias de marketing ───────────────────────────────────────────────────
+// Horarios definidos en hora de ESPAÑA (la audiencia); se convierten a la zona del
+// usuario al aplicarlos. Cada preset setea tipo + horarios + cadencia de una.
+const STRATEGIES = [
+  { key: 'engage',  name: 'Engagement máx',     emoji: '🔥', type: null,
+    spainTimes: ['13:00', '19:00', '21:00'], repeatDays: 7,
+    desc: 'Picos de actividad en España: mediodía + prime time de noche. 3 al día, 7 días.' },
+  { key: 'stories', name: 'Historias diarias',  emoji: '📲', type: 'STORY',
+    spainTimes: ['09:00', '14:00', '21:00'], repeatDays: 7,
+    desc: 'Historias mañana / mediodía / noche, cuando más se miran. 3 al día, 7 días.' },
+  { key: 'reels',   name: 'Reels prime-time',   emoji: '🎬', type: 'REEL',
+    spainTimes: ['13:30', '20:30'], repeatDays: 7,
+    desc: 'Reels al mediodía y en el prime time 20–22h ES (máximo alcance). 2 al día, 7 días.' },
+  { key: 'photo',   name: 'Foto + caption',     emoji: '🖼️', type: 'POST',
+    spainTimes: ['14:00', '20:00'], repeatDays: 7,
+    desc: 'Fotos en la sobremesa y la noche, los huecos de scroll relajado. 2 al día, 7 días.' },
+  { key: 'soft',    name: 'Suave (cuenta nueva)', emoji: '🌱', type: null,
+    spainTimes: ['20:00'], repeatDays: 7, spread: 45,
+    desc: '1 post al día en el prime time. Cadencia baja para no quemar cuentas recién calentadas.' },
+]
+const activeStrategy = ref<string | null>(null)
+function applyStrategy(s: typeof STRATEGIES[number]) {
+  activeStrategy.value = s.key
+  if (s.type) form.value.contentType = s.type
+  form.value.repeatDays = s.repeatDays
+  if (s.spread != null) form.value.spreadMinutes = s.spread
+  form.value.times = s.spainTimes.map(t => madridTimeToUserTime(form.value.date, t))
+  const pairs = s.spainTimes.map((t, i) => `${t} ES → ${form.value.times[i]}`).join(' · ')
+  toast.success(`Estrategia: ${s.name}`, { description: pairs, duration: 7000 })
+}
+const activeStrategyDesc = computed(() => STRATEGIES.find(s => s.key === activeStrategy.value)?.desc || '')
 const accounts = ref<IgAccountLite[]>([])
 const selected = ref<Set<number>>(new Set())
 const loadingAccounts = ref(false)
@@ -185,10 +217,18 @@ watch(() => props.open, (o) => {
       date: props.initialDate || fmtDate(today), times: [props.initialTime || '12:00'], repeatDays: 1, spreadMinutes: 30,
     }
     file.value = null; filePreview.value = null; selected.value = new Set()
+    activeStrategy.value = null
     if (mediaObjUrl.value) { URL.revokeObjectURL(mediaObjUrl.value); mediaObjUrl.value = null }
     resetStory()
     if (first?.id) loadAccounts(first.id)
   }
+})
+
+// Si hay una estrategia activa y cambia la fecha de inicio, recalcular los horarios
+// (la diferencia España↔tu-zona varía según el horario de verano).
+watch(() => form.value.date, () => {
+  const s = STRATEGIES.find(x => x.key === activeStrategy.value)
+  if (s) form.value.times = s.spainTimes.map(t => madridTimeToUserTime(form.value.date, t))
 })
 
 watch(() => form.value.modelId, (id) => { if (id) loadAccounts(id); else accounts.value = [] })
@@ -559,6 +599,23 @@ const CONTENT_LABEL: Record<string, string> = { REEL: 'Reel', STORY: 'Historia',
             <Label class="text-xs font-bold uppercase tracking-wide text-zinc-500">Repartir entre cuentas (min)</Label>
             <Input type="number" v-model.number="form.spreadMinutes" min="0" max="180" class="h-10" />
           </div>
+        </div>
+
+        <!-- Estrategia (horarios óptimos de España) -->
+        <div class="space-y-1.5">
+          <Label class="text-xs font-bold uppercase tracking-wide text-zinc-500 flex items-center gap-1.5"><Sparkles class="w-3.5 h-3.5 text-violet-500" /> Estrategia</Label>
+          <div class="flex flex-wrap gap-1.5">
+            <button v-for="s in STRATEGIES" :key="s.key" type="button" @click="applyStrategy(s)" :title="s.desc"
+              :class="['h-8 px-3 rounded-xl border text-xs font-bold transition-all',
+                       activeStrategy === s.key ? 'border-violet-500 bg-violet-500/10 text-violet-600 dark:text-violet-400' : 'border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800']">
+              {{ s.emoji }} {{ s.name }}
+            </button>
+          </div>
+          <p v-if="activeStrategyDesc" class="text-[10px] text-zinc-500 leading-snug">{{ activeStrategyDesc }}</p>
+          <p class="text-[10px] text-zinc-400 flex items-start gap-1 leading-snug">
+            <Clock class="w-3 h-3 mt-0.5 shrink-0" />
+            <span>Horarios pensados para audiencia de <b>España</b> — convertidos a tu zona ({{ tzAbbrev() }}). Podés ajustarlos abajo.</span>
+          </p>
         </div>
 
         <!-- Horarios (plantilla) -->

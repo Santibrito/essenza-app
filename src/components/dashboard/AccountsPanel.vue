@@ -3,7 +3,7 @@ import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
 import {
   Sparkles, RefreshCw, Trash2, Copy, Instagram, Loader2,
   PlayCircle, ScrollText, ShieldAlert, Image as ImageIcon, Check, X, Globe, ExternalLink, Pencil,
-  KeyRound, RotateCcw, ShieldCheck,
+  KeyRound, RotateCcw, ShieldCheck, Download,
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -22,8 +22,30 @@ const {
   accounts, loading, busyId,
   fetchByModel, createProxySlot, attachInstagram,
   refreshStats, runStep, mark, remove, fetchEvents, setWebsite, setUsername,
-  getCredentials, updateAccount, regenerateProxy,
+  getCredentials, updateAccount, regenerateProxy, validateProxy, importAccount,
 } = useIgAccounts()
+
+// ── Importar cuenta YA LISTA (con su proxy propio) ──────────────────────────
+const showImport = ref(false)
+const importing = ref(false)
+const imp = ref({
+  igUsername: '', igPassword: '', totpSeed: '', backupCodes: '',
+  email: '', emailPassword: '', proxy: '', status: 'READY',
+})
+function openImport() {
+  imp.value = { igUsername: '', igPassword: '', totpSeed: '', backupCodes: '', email: '', emailPassword: '', proxy: '', status: 'READY' }
+  showImport.value = true
+}
+async function submitImport() {
+  if (!selectedModelId.value) { toast.error('Elegí una modelo primero'); return }
+  if (!imp.value.igUsername.trim() || !imp.value.igPassword.trim()) { toast.error('Faltan usuario y contraseña'); return }
+  if (!imp.value.proxy.trim()) { toast.error('Pegá el proxy de la cuenta'); return }
+  importing.value = true
+  try {
+    const acc = await importAccount({ modelId: selectedModelId.value, ...imp.value })
+    if (acc) showImport.value = false
+  } finally { importing.value = false }
+}
 
 // ── Selector de modelo (el panel es standalone, marketing elige la modelo) ──
 const models = ref<{ id: number; name: string }[]>([])
@@ -239,20 +261,14 @@ async function handleCreateSlot() {
 // ── Enganchar Instagram ──
 const showAttachDialog = ref(false)
 const attachTarget = ref<IgAccount | null>(null)
-const attachForm = ref({ bundle: '', fullName: '', bio: '', externalUrl: '', status: 'IMPORTED' })
-const attachPhoto = ref<File | null>(null)
-const attachPhotoPreview = ref<string | null>(null)
+// Solo el paquete: el warmup, la foto, el @ y la bio se hacen A MANO en AdsPower.
+// La cuenta se engancha siempre como READY (lista para subir contenido).
+const attachForm = ref({ bundle: '' })
 const attaching = ref(false)
 function openAttach(acc: IgAccount) {
   attachTarget.value = acc
-  attachForm.value = { bundle: '', fullName: '', bio: '', externalUrl: '', status: 'IMPORTED' }
-  attachPhoto.value = null
-  attachPhotoPreview.value = null
+  attachForm.value = { bundle: '' }
   showAttachDialog.value = true
-}
-function onPhotoChange(e: Event) {
-  const f = (e.target as HTMLInputElement).files?.[0]
-  if (f) { attachPhoto.value = f; attachPhotoPreview.value = URL.createObjectURL(f) }
 }
 async function handleAttach() {
   if (!attachTarget.value) return
@@ -260,11 +276,8 @@ async function handleAttach() {
   attaching.value = true
   const res = await attachInstagram(attachTarget.value.id, {
     bundle: attachForm.value.bundle.trim(),
-    fullName: attachForm.value.fullName.trim() || undefined,
-    bio: attachForm.value.bio.trim() || undefined,
-    externalUrl: attachForm.value.externalUrl.trim() || undefined,
-    status: attachForm.value.status,
-  }, attachPhoto.value)
+    status: 'READY',
+  }, null)
   attaching.value = false
   if (res) {
     showAttachDialog.value = false
@@ -310,6 +323,10 @@ const sortedAccounts = computed(() => accounts.value)
         </select>
         <Button size="sm" variant="outline" class="h-8 gap-2 font-semibold" @click="open2fa()">
           <ShieldCheck class="w-3.5 h-3.5 text-emerald-500" /> Código 2FA
+        </Button>
+        <Button size="sm" variant="outline" :disabled="!selectedModelId" @click="openImport"
+          class="h-8 gap-2 font-semibold">
+          <Download class="w-3.5 h-3.5 text-emerald-500" /> Importar lista
         </Button>
         <Button size="sm" :disabled="!selectedModelId" @click="showSlotDialog = true"
           class="h-8 gap-2 font-semibold bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white border-0">
@@ -361,7 +378,20 @@ const sortedAccounts = computed(() => accounts.value)
         <!-- Proxy (clave para AdsPower) -->
         <div class="flex items-center gap-2 bg-muted/30 rounded-lg px-2.5 py-1.5 border border-dashed border-border/40">
           <span class="text-[9px] font-black uppercase tracking-widest text-muted-foreground shrink-0">Proxy {{ a.proxyCountry }}</span>
+          <!-- Badge de validación (mobile + ES + limpio) -->
+          <span
+            class="text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0"
+            :class="a.proxyValid === true ? 'bg-emerald-500/15 text-emerald-600'
+                  : a.proxyValid === false ? 'bg-red-500/15 text-red-600'
+                  : 'bg-muted text-muted-foreground'"
+            :title="a.proxyCheckDetail || 'Sin verificar'">
+            {{ a.proxyValid === true ? '✓ válido' : a.proxyValid === false ? '✗ inválido' : '? sin verificar' }}
+          </span>
           <span class="text-[10px] font-mono truncate flex-1 text-foreground/70">{{ a.proxy || '—' }}</span>
+          <button @click="validateProxy(a.id)" :disabled="busyId === a.id"
+            class="text-muted-foreground hover:text-emerald-600 shrink-0 disabled:opacity-40" title="Validar proxy ahora (mobile + España + limpio)">
+            <ShieldCheck class="w-3.5 h-3.5" />
+          </button>
           <button @click="copyProxy(a.proxy)" class="text-muted-foreground hover:text-primary shrink-0" title="Copiar para AdsPower">
             <Copy class="w-3.5 h-3.5" />
           </button>
@@ -510,53 +540,78 @@ const sortedAccounts = computed(() => accounts.value)
       </DialogContent>
     </Dialog>
 
+    <!-- Dialog: importar cuenta YA LISTA (con su proxy propio) -->
+    <Dialog :open="showImport" @update:open="showImport = $event">
+      <DialogContent class="sm:max-w-[480px]">
+        <DialogHeader>
+          <DialogTitle class="text-lg font-black flex items-center gap-2"><Download class="w-4 h-4 text-emerald-500" /> Importar cuenta lista</DialogTitle>
+          <DialogDescription class="text-xs">Para cuentas ya calentadas que traen <b>su propio proxy</b>. Se guarda tal cual (NO se genera uno nuevo: cambiar la IP quema la cuenta) y queda lista para el calendario.</DialogDescription>
+        </DialogHeader>
+        <div class="grid gap-3 py-2 max-h-[60vh] overflow-y-auto pr-1">
+          <div class="grid grid-cols-2 gap-3">
+            <div class="grid gap-1.5">
+              <Label class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Usuario / @ *</Label>
+              <Input v-model="imp.igUsername" placeholder="strelli.soff" class="h-9 text-xs" />
+            </div>
+            <div class="grid gap-1.5">
+              <Label class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Contraseña IG *</Label>
+              <Input v-model="imp.igPassword" placeholder="contraseña" class="h-9 text-xs" />
+            </div>
+          </div>
+          <div class="grid gap-1.5">
+            <Label class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">2FA seed (base32)</Label>
+            <Input v-model="imp.totpSeed" placeholder="LIP4 BT5Z JDFJ ..." class="h-9 text-xs font-mono" />
+          </div>
+          <div class="grid gap-1.5">
+            <Label class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Backup codes</Label>
+            <Textarea v-model="imp.backupCodes" placeholder="2493 6871&#10;6987 1304 ..." class="min-h-[48px] text-xs font-mono resize-none" />
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div class="grid gap-1.5">
+              <Label class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Email</Label>
+              <Input v-model="imp.email" placeholder="sofia01@propyges.com" class="h-9 text-xs" />
+            </div>
+            <div class="grid gap-1.5">
+              <Label class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Contraseña email</Label>
+              <Input v-model="imp.emailPassword" placeholder="(opcional)" class="h-9 text-xs" />
+            </div>
+          </div>
+          <div class="grid gap-1.5">
+            <Label class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Proxy (el que ya tiene) *</Label>
+            <Textarea v-model="imp.proxy" placeholder="socks5://user-...-country-es-city-Madrid-rotation-0...@geo.g-w.info:10800" class="min-h-[48px] text-xs font-mono resize-none" />
+          </div>
+          <div class="grid gap-1.5">
+            <Label class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Estado inicial</Label>
+            <select v-model="imp.status" class="w-full h-9 rounded-md border border-input bg-background px-3 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-ring">
+              <option value="READY">LISTA (publica ya)</option>
+              <option value="WARMING">Calentando (todavía no publica)</option>
+            </select>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" size="sm" @click="showImport = false" :disabled="importing" class="h-8 text-xs font-semibold">Cancelar</Button>
+          <Button size="sm" @click="submitImport" :disabled="importing" class="h-8 text-xs font-semibold gap-1.5">
+            <Loader2 v-if="importing" class="w-3 h-3 animate-spin" /><Download v-else class="w-3 h-3" /> Importar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
     <!-- Dialog: enganchar Instagram -->
     <Dialog :open="showAttachDialog" @update:open="showAttachDialog = $event">
       <DialogContent class="sm:max-w-[480px]">
         <DialogHeader>
           <DialogTitle class="text-lg font-black flex items-center gap-2"><Instagram class="w-4 h-4 text-pink-500" /> Enganchar Instagram</DialogTitle>
-          <DialogDescription class="text-xs">Solo el paquete es obligatorio. Si la cuenta ya tiene el perfil hecho, elegí el estado para saltar el setup. Usa el proxy ya generado.</DialogDescription>
+          <DialogDescription class="text-xs">Pegá el paquete y la cuenta queda lista para subir contenido. El calentamiento, la foto, el usuario y la descripción se hacen a mano en AdsPower. Usa el proxy ya generado.</DialogDescription>
         </DialogHeader>
-        <div class="grid gap-3 py-2 max-h-[60vh] overflow-y-auto pr-1">
+        <div class="grid gap-3 py-2">
           <div class="grid gap-1.5">
             <Label class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Paquete (user:pass:seed:backup:email:emailpass) *</Label>
             <Textarea v-model="attachForm.bundle" placeholder="britanny...:britanny7834:OF4E...:0678... :mail@outlook.com:pass" class="min-h-[60px] text-xs font-mono resize-none" />
           </div>
-          <div class="grid gap-1.5">
-            <Label class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Estado inicial</Label>
-            <select v-model="attachForm.status" class="w-full h-9 rounded-md border border-input bg-background px-3 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-ring">
-              <option value="IMPORTED">Nueva — hacer login, foto, bio y warmup automático</option>
-              <option value="WARMING">Perfil ya hecho — solo calentar</option>
-              <option value="READY">Perfil ya hecho y caliente — LISTA para publicar</option>
-            </select>
-            <p class="text-[10px] text-muted-foreground leading-snug">
-              Con <b>WARMING</b> o <b>LISTA</b> se saltan foto y bio (la cuenta ya las tiene). La foto/descripción de abajo quedan opcionales.
-            </p>
-          </div>
-          <div class="grid gap-1.5">
-            <Label class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Foto de perfil <span class="text-muted-foreground/50 normal-case font-medium">(opcional)</span></Label>
-            <div class="flex items-center gap-3">
-              <div class="w-14 h-14 rounded-full bg-muted overflow-hidden flex items-center justify-center shrink-0">
-                <img v-if="attachPhotoPreview" :src="attachPhotoPreview" class="w-full h-full object-cover" />
-                <ImageIcon v-else class="w-4 h-4 text-muted-foreground/40" />
-              </div>
-              <input type="file" accept="image/*" @change="onPhotoChange" class="text-xs" />
-            </div>
-          </div>
-          <div class="grid grid-cols-2 gap-3">
-            <div class="grid gap-1.5">
-              <Label class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Nombre</Label>
-              <Input v-model="attachForm.fullName" placeholder="Britanny" class="h-9 text-xs" />
-            </div>
-            <div class="grid gap-1.5">
-              <Label class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Link (bio)</Label>
-              <Input v-model="attachForm.externalUrl" placeholder="https://onlyfans.com/..." class="h-9 text-xs" />
-            </div>
-          </div>
-          <div class="grid gap-1.5">
-            <Label class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Descripción (bio) <span class="text-muted-foreground/50 normal-case font-medium">(opcional)</span></Label>
-            <Textarea v-model="attachForm.bio" placeholder="Modelo · link abajo 🔥" class="min-h-[50px] text-xs resize-none" />
-          </div>
+          <p class="text-[10px] text-muted-foreground leading-snug rounded-md bg-emerald-500/10 border border-emerald-500/20 px-3 py-2">
+            Se engancha como <b class="text-emerald-600 dark:text-emerald-400">LISTA ✅</b> (lista para publicar). El warmup, la foto, el @ y la bio se hacen en AdsPower con el proxy ya generado — el sistema solo sube el contenido.
+          </p>
         </div>
         <DialogFooter>
           <Button variant="ghost" size="sm" @click="showAttachDialog = false" :disabled="attaching" class="h-8 text-xs font-semibold">Cancelar</Button>

@@ -15,6 +15,9 @@ export interface IgAccount {
   has2fa: boolean
   proxy?: string
   proxyCountry: string | null
+  proxyValid?: boolean | null
+  proxyCheckedAt?: string | null
+  proxyCheckDetail?: string | null
   adsPowerId: string | null
   status: string
   loginVerified: boolean
@@ -81,6 +84,29 @@ export function useIgAccounts() {
       return acc
     } catch (e: any) {
       toast.error('No se pudo generar el proxy', { description: e.message })
+      return null
+    }
+  }
+
+  /** Importar una cuenta YA LISTA con su proxy propio (sin generar uno nuevo). */
+  async function importAccount(data: {
+    modelId: number; igUsername: string; igPassword: string; totpSeed?: string; backupCodes?: string;
+    email?: string; emailPassword?: string; proxy: string; proxyCountry?: string; status?: string;
+    fullName?: string; bio?: string; externalUrl?: string;
+  }): Promise<IgAccount | null> {
+    try {
+      const res = await fetch(`${apiUrl}/automation/ig-accounts/import`, {
+        method: 'POST', headers: jsonHeaders(), body: JSON.stringify(data),
+      })
+      if (!res.ok) throw new Error(await parseErr(res))
+      const acc = await res.json()
+      accounts.value.unshift(acc)
+      toast.success(`@${acc.igUsername} importada como ${acc.status} ✨`, {
+        description: acc.proxyValid === false ? 'OJO: el proxy no pasó la validación, revisalo.' : 'Proxy validado, lista para el calendario.',
+      })
+      return acc
+    } catch (e: any) {
+      toast.error('No se pudo importar la cuenta', { description: e.message })
       return null
     }
   }
@@ -210,6 +236,25 @@ export function useIgAccounts() {
     } finally { busyId.value = null }
   }
 
+  /** Valida AHORA el proxy de la cuenta (mobile + país + limpio). NO cambia la IP. */
+  async function validateProxy(id: number): Promise<boolean> {
+    busyId.value = id
+    try {
+      const res = await fetch(`${apiUrl}/automation/ig-accounts/${id}/validate-proxy`, { method: 'POST', headers: authHeader() })
+      const body = await res.json().catch(() => ({} as any))
+      if (!res.ok) throw new Error(body?.error || `Error ${res.status}`)
+      const acc = body.account || body
+      const idx = accounts.value.findIndex(a => a.id === id)
+      if (idx !== -1) accounts.value[idx] = acc
+      if (body.ok) toast.success('Proxy OK ✅', { description: body.detail })
+      else toast.error('Proxy inválido ❌ — no se publicará', { description: body.detail })
+      return !!body.ok
+    } catch (e: any) {
+      toast.error('No se pudo validar el proxy', { description: e.message })
+      return false
+    } finally { busyId.value = null }
+  }
+
   /** Cambia el USUARIO de login (cuando se cambió el @ en IG por AdsPower). */
   async function setUsername(id: number, igUsername: string): Promise<boolean> {
     busyId.value = id
@@ -278,6 +323,6 @@ export function useIgAccounts() {
     accounts, loading, busyId,
     fetchByModel, createProxySlot, attachInstagram,
     refreshStats, runStep, mark, remove, fetchEvents, setWebsite, setUsername,
-    getCredentials, updateAccount, regenerateProxy,
+    getCredentials, updateAccount, regenerateProxy, validateProxy, importAccount,
   }
 }

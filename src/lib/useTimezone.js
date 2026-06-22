@@ -135,19 +135,36 @@ export function useTimezone() {
    * del usuario (userTz) a un instante absoluto en ISO UTC (con Z).
    * Sirve para MANDAR al backend: el server guarda el Instant sin reinterpretar zona.
    */
-  function zonedToUtcISO(dateStr, timeStr) {
+  function zonedToUtcISOInTz(dateStr, timeStr, tz) {
     const [y, mo, d] = dateStr.split('-').map(Number)
     const [h, mi] = timeStr.split(':').map(Number)
     const asUtc = Date.UTC(y, mo - 1, d, h, mi, 0)
     const parts = new Intl.DateTimeFormat('en-US', {
-      timeZone: userTz.value, year: 'numeric', month: '2-digit', day: '2-digit',
+      timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
       hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
     }).formatToParts(new Date(asUtc))
     const get = (t) => Number(parts.find((p) => p.type === t).value)
     let hh = get('hour'); if (hh === 24) hh = 0
     const seen = Date.UTC(get('year'), get('month') - 1, get('day'), hh, get('minute'), get('second'))
-    const offset = seen - asUtc // cuánto está adelantada userTz respecto de UTC
+    const offset = seen - asUtc // cuánto está adelantada tz respecto de UTC
     return new Date(asUtc - offset).toISOString()
+  }
+
+  function zonedToUtcISO(dateStr, timeStr) {
+    return zonedToUtcISOInTz(dateStr, timeStr, userTz.value)
+  }
+
+  /**
+   * Convierte una hora de pared 'HH:mm' de España (Europe/Madrid) en la 'HH:mm'
+   * equivalente en la zona del usuario, para el mismo instante y la fecha dada.
+   * Sirve para las estrategias: definimos los horarios óptimos en hora de España
+   * (la audiencia) y los mostramos/usamos en la zona del usuario.
+   */
+  function madridTimeToUserTime(dateStr, timeStr, fromTz = 'Europe/Madrid') {
+    const iso = zonedToUtcISOInTz(dateStr, timeStr, fromTz)
+    return new Intl.DateTimeFormat('en-GB', {
+      timeZone: userTz.value, hour: '2-digit', minute: '2-digit', hour12: false,
+    }).format(new Date(iso))
   }
 
   /** Devuelve la clave de día 'YYYY-MM-DD' de un instante, VISTO en la zona del usuario. */
@@ -178,6 +195,8 @@ export function useTimezone() {
     formatRelative,
     convertShiftTime,
     zonedToUtcISO,
+    zonedToUtcISOInTz,
+    madridTimeToUserTime,
     dateKeyInUserTz,
     tzAbbrev,
   }
