@@ -9,3 +9,4 @@ release
 *.AppImage
 *.pkg
 GUIA_RELEASES.md
+.mcp.json

@@ -323,6 +323,48 @@ ipcMain.handle('window:is-maximized', (e) =>
   BrowserWindow.fromWebContents(e.sender)?.isMaximized() ?? false
 )
 
+// ─── IPC: Auto-start (arranque con Windows) ──────────────────────────────────
+// El empleado eligió arranque VISIBLE: la ventana se abre normalmente al iniciar
+// sesión en Windows, como recordatorio para fichar el turno.
+function getAutoStartEnabled() {
+  try {
+    return app.getLoginItemSettings().openAtLogin
+  } catch (e) {
+    console.error('[AutoStart] No se pudo leer el estado:', e?.message)
+    return false
+  }
+}
+
+function setAutoStartEnabled(enabled) {
+  try {
+    app.setLoginItemSettings({ openAtLogin: !!enabled, path: process.execPath, args: [] })
+  } catch (e) {
+    console.error('[AutoStart] No se pudo cambiar el arranque automático:', e?.message)
+  }
+}
+
+// La primera vez (solo en prod) lo dejamos activado por defecto. Marcamos un
+// archivo para no volver a forzarlo: si el empleado lo apaga, queda apagado.
+function ensureAutoStartDefault() {
+  if (isDev) return
+  try {
+    const marker = path.join(app.getPath('userData'), '.autostart-initialized')
+    if (!fs.existsSync(marker)) {
+      setAutoStartEnabled(true)
+      fs.writeFileSync(marker, '1')
+      console.log('[AutoStart] Activado por defecto (primer arranque)')
+    }
+  } catch (e) {
+    console.error('[AutoStart] No se pudo inicializar el default:', e?.message)
+  }
+}
+
+ipcMain.handle('autostart:get', () => getAutoStartEnabled())
+ipcMain.handle('autostart:set', (_e, enabled) => {
+  setAutoStartEnabled(enabled)
+  return getAutoStartEnabled()
+})
+
 // ─── IPC: Notifications ──────────────────────────────────────────────────────
 ipcMain.on('notification:send', (_e, { title, body, silent }) => {
   const { Notification } = require('electron')
@@ -550,6 +592,7 @@ app.whenReady().then(() => {
   
   createWindow()
   createTray()
+  ensureAutoStartDefault()
 
   // Periodic memory cleanup (every 5 minutes for low-RAM, 10 minutes for normal)
   const cleanupInterval = optimizationConfig.isLowRAM ? 3 * 60 * 1000 : 10 * 60 * 1000

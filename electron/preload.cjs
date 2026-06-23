@@ -27,6 +27,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     syncTime:  (data)   => ipcRenderer.send('shift:sync-time', data),
   },
   sendNotification: (payload) => ipcRenderer.send('notification:send', payload),
+
+  // ─── Auto-start (arranque con Windows) ───────────────────────────────────
+  autostart: {
+    get: () => ipcRenderer.invoke('autostart:get'),
+    set: (enabled) => ipcRenderer.invoke('autostart:set', enabled),
+  },
   
   // ─── Cache management ────────────────────────────────────────────────────
   clearCache: () => ipcRenderer.send('clear-cache'),

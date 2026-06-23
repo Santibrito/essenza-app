@@ -8,7 +8,7 @@ import { ref, computed, watch } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { toast } from 'vue-sonner'
 import api from '@/api'
-import { Globe, User, Clock, CheckCircle2, Camera, Upload, Loader2 } from 'lucide-vue-next'
+import { Globe, User, Clock, CheckCircle2, Camera, Upload, Loader2, Power } from 'lucide-vue-next'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -130,6 +130,40 @@ function cancelPreview() {
   previewUrl.value = null
   if (fileInput.value) fileInput.value.value = ''
 }
+
+// ── Arranque con Windows ────────────────────────────────────────────────────
+const electronAPI = (window as any).electronAPI
+const autoStartSupported = ref(false)
+const autoStartEnabled = ref(false)
+const autoStartBusy = ref(false)
+
+async function loadAutoStart() {
+  if (!electronAPI?.autostart) return
+  autoStartSupported.value = true
+  try {
+    autoStartEnabled.value = await electronAPI.autostart.get()
+  } catch {
+    // si falla la lectura dejamos el toggle en false; no es bloqueante
+  }
+}
+
+async function toggleAutoStart() {
+  if (!electronAPI?.autostart || autoStartBusy.value) return
+  autoStartBusy.value = true
+  try {
+    autoStartEnabled.value = await electronAPI.autostart.set(!autoStartEnabled.value)
+    toast.success(autoStartEnabled.value
+      ? 'Essenza se abrirá al iniciar Windows'
+      : 'Arranque automático desactivado')
+  } catch {
+    toast.error('No se pudo cambiar el arranque automático')
+  } finally {
+    autoStartBusy.value = false
+  }
+}
+
+// Refrescar el estado real del SO cada vez que se abre el panel.
+watch(() => props.open, (o) => { if (o) loadAutoStart() }, { immediate: true })
 </script>
 
 <template>
@@ -291,6 +325,38 @@ function cancelPreview() {
             {{ saving ? 'Guardando...' : 'Guardar zona horaria' }}
           </Button>
         </section>
+
+        <!-- ── Arranque con Windows ───────────────────────────────────────── -->
+        <template v-if="autoStartSupported">
+          <Separator />
+          <section class="space-y-3">
+            <div class="flex items-center gap-2">
+              <Power class="w-4 h-4 text-primary" />
+              <h3 class="text-sm font-semibold text-foreground">Arranque automático</h3>
+            </div>
+            <p class="text-xs text-muted-foreground leading-relaxed">
+              Abrí Essenza automáticamente al iniciar Windows, para no olvidarte de fichar tu turno.
+            </p>
+
+            <button
+              type="button"
+              :disabled="autoStartBusy"
+              class="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg border border-border hover:bg-muted/50 transition-colors disabled:opacity-60"
+              @click="toggleAutoStart"
+            >
+              <span class="text-sm font-medium text-foreground">Iniciar con Windows</span>
+              <span
+                class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors"
+                :class="autoStartEnabled ? 'bg-primary' : 'bg-muted-foreground/30'"
+              >
+                <span
+                  class="inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform"
+                  :class="autoStartEnabled ? 'translate-x-5' : 'translate-x-0.5'"
+                />
+              </span>
+            </button>
+          </section>
+        </template>
 
       </div>
 
